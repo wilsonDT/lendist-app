@@ -5,6 +5,8 @@ from typing import Optional
 class BorrowerBase(BaseModel):
     name: str
     mobile: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
 
 class BorrowerCreate(BorrowerBase):
     pass

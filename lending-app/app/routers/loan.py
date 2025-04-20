@@ -59,22 +59,50 @@ async def read_loan(
         "created_at": db_loan.created_at
     }
 
-@router.get("/", response_model=List[LoanResponse])
+@router.get("/", response_model=List[Dict[str, Any]])
 async def read_loans(
     skip: int = 0, 
     limit: int = 100, 
     db: AsyncSession = Depends(get_session)
 ):
     loans = await loan_crud.get_loans(db, skip=skip, limit=limit)
-    return loans
+    # Convert loans to dictionaries to avoid relationship loading issues
+    return [
+        {
+            "id": loan.id,
+            "borrower_id": loan.borrower_id,
+            "principal": loan.principal,
+            "interest_rate_percent": loan.interest_rate_percent,
+            "term_units": loan.term_units,
+            "term_frequency": loan.term_frequency,
+            "repayment_type": loan.repayment_type,
+            "start_date": loan.start_date,
+            "created_at": loan.created_at,
+        }
+        for loan in loans
+    ]
 
-@router.get("/borrower/{borrower_id}", response_model=List[LoanResponse])
+@router.get("/borrower/{borrower_id}", response_model=List[Dict[str, Any]])
 async def read_loans_by_borrower(
     borrower_id: int, 
     db: AsyncSession = Depends(get_session)
 ):
     loans = await loan_crud.get_loans_by_borrower(db, borrower_id)
-    return loans
+    # Convert loans to dictionaries to avoid relationship loading issues
+    return [
+        {
+            "id": loan.id,
+            "borrower_id": loan.borrower_id,
+            "principal": loan.principal,
+            "interest_rate_percent": loan.interest_rate_percent,
+            "term_units": loan.term_units,
+            "term_frequency": loan.term_frequency,
+            "repayment_type": loan.repayment_type,
+            "start_date": loan.start_date,
+            "created_at": loan.created_at,
+        }
+        for loan in loans
+    ]
 
 @router.put("/{loan_id}", response_model=LoanResponse)
 async def update_loan(

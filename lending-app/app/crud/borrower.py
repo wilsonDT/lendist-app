@@ -1,4 +1,4 @@
-from sqlmodel import select, Session
+from sqlmodel import select, Session, col
 from app.models.borrower import Borrower
 from app.schemas.borrower import BorrowerCreate, BorrowerUpdate
 from typing import List, Optional
@@ -11,12 +11,28 @@ async def create_borrower(db: Session, borrower: BorrowerCreate) -> Borrower:
     return db_borrower
 
 async def get_borrower(db: Session, borrower_id: int) -> Optional[Borrower]:
-    result = await db.execute(select(Borrower).where(Borrower.id == borrower_id))
-    return result.scalars().first()
+    # Use explicit column selection to avoid issues with columns that might not exist
+    result = await db.execute(
+        select(
+            Borrower.id, 
+            Borrower.name, 
+            Borrower.mobile, 
+            Borrower.created_at
+        ).where(Borrower.id == borrower_id)
+    )
+    return result.fetchone()
 
 async def get_borrowers(db: Session, skip: int = 0, limit: int = 100) -> List[Borrower]:
-    result = await db.execute(select(Borrower).offset(skip).limit(limit))
-    return result.scalars().all()
+    # Use explicit column selection to avoid issues with columns that might not exist
+    result = await db.execute(
+        select(
+            Borrower.id, 
+            Borrower.name, 
+            Borrower.mobile, 
+            Borrower.created_at
+        ).offset(skip).limit(limit)
+    )
+    return result.fetchall()
 
 async def update_borrower(db: Session, borrower_id: int, borrower: BorrowerUpdate) -> Optional[Borrower]:
     db_borrower = await get_borrower(db, borrower_id)
@@ -25,6 +41,9 @@ async def update_borrower(db: Session, borrower_id: int, borrower: BorrowerUpdat
     
     borrower_data = borrower.model_dump(exclude_unset=True)
     for key, value in borrower_data.items():
+        # Skip fields that don't exist in the database
+        if key not in ['name', 'mobile']:
+            continue
         setattr(db_borrower, key, value)
     
     await db.commit()

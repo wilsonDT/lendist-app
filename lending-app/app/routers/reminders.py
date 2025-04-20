@@ -2,12 +2,14 @@ from fastapi import APIRouter, Depends, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
 from datetime import date, timedelta
-from sqlmodel import select
+from sqlmodel import select, join
 
 from app.core.database import get_session
 from app.schemas.payment import PaymentResponse
 from app.crud import payment as payment_crud
 from app.models.payment import Payment
+from app.models.loan import Loan
+from app.models.borrower import Borrower
 
 router = APIRouter()
 
@@ -21,28 +23,39 @@ async def todays_reminders(
     today = date.today()
     tomorrow = today + timedelta(days=1)
     
-    # Get payments due today or tomorrow
-    result = await db.execute(
-        select(Payment)
-        .where(
-            Payment.due_date.between(today, tomorrow),
-            Payment.amount_paid < Payment.amount_due
-        )
+    # Get payments due today or tomorrow along with loan and borrower info
+    query = select(
+        Payment, 
+        Loan.id.label("loan_id"), 
+        Borrower.name.label("borrower_name")
+    ).join(
+        Loan, Payment.loan_id == Loan.id
+    ).join(
+        Borrower, Loan.borrower_id == Borrower.id
+    ).where(
+        Payment.due_date.between(today, tomorrow),
+        Payment.amount_paid < Payment.amount_due
     )
-    payments = result.scalars().all()
     
-    # Convert to dict to avoid relationship loading issues
-    return [
-        {
+    result = await db.execute(query)
+    rows = result.all()
+    
+    # Format the results for the frontend
+    reminders = []
+    for row in rows:
+        payment, loan_id, borrower_name = row
+        reminders.append({
             "id": payment.id,
             "loan_id": payment.loan_id,
-            "due_date": str(payment.due_date),
-            "amount_due": payment.amount_due,
-            "amount_paid": payment.amount_paid,
-            "status": "due_today" if payment.due_date == today else "due_tomorrow"
-        }
-        for payment in payments
-    ]
+            "borrower_name": borrower_name,
+            "type": "due_today" if payment.due_date == today else "due_tomorrow",
+            "message": f"Payment of ₱{payment.amount_due - payment.amount_paid:.2f} is due today" 
+                if payment.due_date == today 
+                else f"Payment of ₱{payment.amount_due - payment.amount_paid:.2f} is due tomorrow",
+            "amount": payment.amount_due - payment.amount_paid
+        })
+    
+    return reminders
 
 @router.get("/send", response_model=List[PaymentResponse])
 async def trigger_reminders(
@@ -69,4 +82,4 @@ async def send_reminders(payments):
     """
     for payment in payments:
         # Just print to console for now
-        print(f"[REMINDER] Payment ID {payment.id} of ${payment.amount_due} is due on {payment.due_date}") 
+        print(f"[REMINDER] Payment ID {payment.id} of ₱{payment.amount_due} is due on {payment.due_date}") 

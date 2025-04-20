@@ -1,8 +1,18 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from app.routers import borrower, loan, payment, dashboard, reminders
 from app.core.scheduler import build_scheduler
 
 app = FastAPI(title="Lending‑MVP")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # React dev server URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(borrower.router, prefix="/borrowers", tags=["Borrowers"])
 app.include_router(loan.router, prefix="/loans", tags=["Loans"])
