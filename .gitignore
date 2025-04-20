@@ -33,4 +33,8 @@ env/
 .idea/
 .vscode/
 *.swp
-*.swo lendist-dashboard/node_modules/@next/
+*.swo
+
+# Node.js
+node_modules/
+*/node_modules/
