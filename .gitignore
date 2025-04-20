@@ -33,4 +33,8 @@ env/
 .idea/
 .vscode/
 *.swp
-*.swo 
+*.swo
+
+# Node.js
+node_modules/
+*/node_modules/

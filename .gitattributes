@@ -1,0 +1,5 @@
+# Track large binary files with Git LFS
+lendist-dashboard/node_modules/@next/swc-darwin-arm64/next-swc.darwin-arm64.node filter=lfs diff=lfs merge=lfs -text
+
+# Configure node_modules dependencies that might be large
+**/node_modules/**/*.node filter=lfs diff=lfs merge=lfs -text
