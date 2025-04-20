@@ -11,6 +11,7 @@ export interface Loan {
   repayment_type: string;
   start_date: string;
   created_at: string;
+  borrower_name?: string;
 }
 
 export function useLoans() {
