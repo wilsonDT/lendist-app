@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Lending Management App with FastAPI and Supabase"
 authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
+packages = [{include = "app"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -15,7 +16,6 @@ alembic = "^1.13"
 python-dotenv = "^1.0"
 apscheduler = "^3.10"
 pydantic-settings = "^2.1.0"
-aiosqlite = "^0.21.0"
 greenlet = "^3.2.0"
 
 [tool.poetry.group.dev.dependencies]

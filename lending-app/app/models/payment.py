@@ -9,6 +9,4 @@ class Payment(SQLModel, table=True):
     due_date: date
     amount_due: float
     amount_paid: float = 0.0
-    paid_at: datetime | None = None
-
-Loan.payments = Relationship(back_populates="loan") 
+    paid_at: datetime | None = None 

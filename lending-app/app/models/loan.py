@@ -1,7 +1,10 @@
 from sqlmodel import SQLModel, Field, Relationship
 from datetime import date, datetime
-from typing import List
+from typing import List, TYPE_CHECKING
 from .borrower import Borrower
+
+if TYPE_CHECKING:
+    from .payment import Payment
 
 class Loan(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
@@ -14,5 +17,5 @@ class Loan(SQLModel, table=True):
     repayment_type: str        # FLAT | AMORTISED
     start_date: date
     created_at: datetime = Field(default_factory=datetime.utcnow)
-
-Borrower.loans = Relationship(back_populates="borrower") 
+    
+    payments: List["Payment"] = Relationship(back_populates="loan") 

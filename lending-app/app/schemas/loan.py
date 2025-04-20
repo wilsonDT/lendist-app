@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 from .borrower import BorrowerResponse
 
 class LoanBase(BaseModel):
@@ -29,4 +29,6 @@ class LoanResponse(LoanBase):
     borrower: Optional[BorrowerResponse] = None
     
     class Config:
-        orm_mode = True 
+        from_attributes = True
+        exclude_unset = True
+        exclude_none = True 

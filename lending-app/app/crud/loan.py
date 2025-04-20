@@ -2,11 +2,11 @@ from sqlmodel import select, Session
 from app.models.loan import Loan
 from app.models.payment import Payment
 from app.schemas.loan import LoanCreate, LoanUpdate
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import date, timedelta
 
 async def create_loan(db: Session, loan: LoanCreate) -> Loan:
-    db_loan = Loan(**loan.dict())
+    db_loan = Loan(**loan.model_dump())
     db.add(db_loan)
     await db.commit()
     await db.refresh(db_loan)
@@ -17,23 +17,24 @@ async def create_loan(db: Session, loan: LoanCreate) -> Loan:
     return db_loan
 
 async def get_loan(db: Session, loan_id: int) -> Optional[Loan]:
-    result = await db.exec(select(Loan).where(Loan.id == loan_id))
-    return result.first()
+    # Use a simple select to avoid loading relationships
+    result = await db.execute(select(Loan).where(Loan.id == loan_id))
+    return result.scalars().first()
 
 async def get_loans(db: Session, skip: int = 0, limit: int = 100) -> List[Loan]:
-    result = await db.exec(select(Loan).offset(skip).limit(limit))
-    return result.all()
+    result = await db.execute(select(Loan).offset(skip).limit(limit))
+    return result.scalars().all()
 
 async def get_loans_by_borrower(db: Session, borrower_id: int) -> List[Loan]:
-    result = await db.exec(select(Loan).where(Loan.borrower_id == borrower_id))
-    return result.all()
+    result = await db.execute(select(Loan).where(Loan.borrower_id == borrower_id))
+    return result.scalars().all()
 
 async def update_loan(db: Session, loan_id: int, loan: LoanUpdate) -> Optional[Loan]:
     db_loan = await get_loan(db, loan_id)
     if not db_loan:
         return None
     
-    loan_data = loan.dict(exclude_unset=True)
+    loan_data = loan.model_dump(exclude_unset=True)
     for key, value in loan_data.items():
         setattr(db_loan, key, value)
     
