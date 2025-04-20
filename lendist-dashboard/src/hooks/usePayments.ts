@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { api } from '../api/useApi';
+import { AxiosResponse } from 'axios';
 
 export interface Payment {
   id: number;
@@ -10,12 +11,50 @@ export interface Payment {
   paid_at: string | null;
 }
 
+export interface RecentPayment {
+  id: number;
+  loan_id: number;
+  borrower_id: number;
+  borrower_name: string;
+  amount_paid: number;
+  payment_date: string;
+  payment_method: string;
+}
+
 export function usePaymentsByLoan(loanId: number) {
-  return useQuery<Payment[]>(
+  return useQuery<Payment[], Error>(
     ['payments', loanId], 
-    () => api.get(`/payments/loan/${loanId}`).then(res => res.data),
+    async () => {
+      try {
+        const response: AxiosResponse<Payment[]> = await api.get(`/payments/loan/${loanId}`);
+        return response.data;
+      } catch (error) {
+        console.error(`Failed to fetch payments for loan ${loanId}:`, error);
+        throw error;
+      }
+    },
     {
-      enabled: !!loanId
+      enabled: !!loanId,
+      staleTime: 1000 * 60 * 5,
+    }
+  );
+}
+
+export function useRecentPayments(limit = 10) {
+  return useQuery<RecentPayment[], Error>(
+    ['recentPayments', limit], 
+    async () => {
+      try {
+        const response: AxiosResponse<RecentPayment[]> = await api.get(`/payments/recent/?limit=${limit}`);
+        return response.data;
+      } catch (error) {
+        console.error('Failed to fetch recent payments:', error);
+        throw error;
+      }
+    },
+    {
+      refetchInterval: 1000 * 60 * 5, // Refetch every 5 minutes
+      staleTime: 1000 * 60,
     }
   );
 }

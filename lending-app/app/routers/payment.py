@@ -3,10 +3,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
+from sqlmodel import select, desc
 
 from app.core.database import get_session
 from app.schemas.payment import PaymentResponse, PaymentUpdate
 from app.crud import payment as payment_crud
+from app.models.payment import Payment
+from app.models.loan import Loan
+from app.models.borrower import Borrower
 
 router = APIRouter()
 
@@ -26,6 +30,15 @@ class PaymentCollected(BaseModel):
     paid_at: datetime
     message: str = "Payment collected successfully"
 
+class RecentPaymentResponse(BaseModel):
+    id: int
+    loan_id: int
+    borrower_id: int
+    borrower_name: str
+    amount_paid: float
+    payment_date: datetime
+    payment_method: str = "cash"
+
 @router.get("/{payment_id}", response_model=PaymentResponse)
 async def read_payment(
     payment_id: int, 
@@ -44,6 +57,39 @@ async def read_payments(
 ):
     payments = await payment_crud.get_payments(db, skip=skip, limit=limit)
     return payments
+
+@router.get("/recent/", response_model=List[RecentPaymentResponse])
+async def get_recent_payments(
+    limit: int = 10,
+    db: AsyncSession = Depends(get_session)
+):
+    # Get payments that have been paid (paid_at is not null)
+    query = (
+        select(Payment, Loan, Borrower)
+        .join(Loan, Payment.loan_id == Loan.id)
+        .join(Borrower, Loan.borrower_id == Borrower.id)
+        .where(Payment.paid_at.is_not(None))
+        .order_by(desc(Payment.paid_at))
+        .limit(limit)
+    )
+    
+    result = await db.execute(query)
+    recent_payments = []
+    
+    for payment, loan, borrower in result:
+        recent_payments.append(
+            RecentPaymentResponse(
+                id=payment.id,
+                loan_id=payment.loan_id,
+                borrower_id=borrower.id,
+                borrower_name=borrower.name,
+                amount_paid=payment.amount_paid,
+                payment_date=payment.paid_at,
+                payment_method="cash"  # Default to cash as payment method isn't stored
+            )
+        )
+    
+    return recent_payments
 
 @router.get("/loan/{loan_id}", response_model=List[Dict[str, Any]])
 async def read_payments_by_loan(
