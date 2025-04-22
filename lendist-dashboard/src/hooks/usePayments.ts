@@ -23,7 +23,7 @@ export interface RecentPayment {
 
 export function usePaymentsByLoan(loanId: number) {
   return useQuery<Payment[], Error>(
-    ['payments', loanId], 
+    ['payments', 'loan', loanId], 
     async () => {
       try {
         const response: AxiosResponse<Payment[]> = await api.get(`/payments/loan/${loanId}`);
@@ -40,9 +40,9 @@ export function usePaymentsByLoan(loanId: number) {
   );
 }
 
-export function useRecentPayments(limit = 10) {
+export function useRecentPayments(limit: number = 10) {
   return useQuery<RecentPayment[], Error>(
-    ['recentPayments', limit], 
+    ['payments', 'recent', limit], 
     async () => {
       try {
         const response: AxiosResponse<RecentPayment[]> = await api.get(`/payments/recent/?limit=${limit}`);
@@ -53,8 +53,26 @@ export function useRecentPayments(limit = 10) {
       }
     },
     {
-      refetchInterval: 1000 * 60 * 5, // Refetch every 5 minutes
-      staleTime: 1000 * 60,
+      staleTime: 1000 * 60 * 5,
+    }
+  );
+}
+
+export function usePaymentsByBorrower(borrowerId: number) {
+  return useQuery<RecentPayment[], Error>(
+    ['payments', 'borrower', borrowerId],
+    async () => {
+      try {
+        const response: AxiosResponse<RecentPayment[]> = await api.get(`/payments/borrower/${borrowerId}`);
+        return response.data;
+      } catch (error) {
+        console.error(`Failed to fetch payments for borrower ${borrowerId}:`, error);
+        return []; // Return empty array if API endpoint not implemented yet
+      }
+    },
+    {
+      enabled: !!borrowerId,
+      staleTime: 1000 * 60 * 5,
     }
   );
 }
@@ -70,7 +88,7 @@ export function useCollectPayment() {
         // Invalidate loan data to refresh after payment
         queryClient.invalidateQueries(['loan', variables.loan_id]);
         queryClient.invalidateQueries(['loans']);
-        queryClient.invalidateQueries(['payments', variables.loan_id]);
+        queryClient.invalidateQueries(['payments', 'loan', variables.loan_id]);
         queryClient.invalidateQueries(['dashboardSummary']);
       }
     }

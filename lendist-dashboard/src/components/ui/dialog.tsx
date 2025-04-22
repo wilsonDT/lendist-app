@@ -63,7 +63,7 @@ interface DialogFooterProps extends React.HTMLAttributes<HTMLDivElement> {
 const DialogFooter: React.FC<DialogFooterProps> = ({ children, className, ...props }) => {
   return (
     <div 
-      className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 p-6 pt-0", className)}
+      className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 p-6", className)}
       {...props}
     >
       {children}
@@ -77,12 +77,12 @@ interface DialogTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {
 
 const DialogTitle: React.FC<DialogTitleProps> = ({ children, className, ...props }) => {
   return (
-    <h2 
+    <h3 
       className={cn("text-lg font-semibold leading-none tracking-tight", className)}
       {...props}
     >
       {children}
-    </h2>
+    </h3>
   );
 };
 
@@ -101,4 +101,11 @@ const DialogDescription: React.FC<DialogDescriptionProps> = ({ children, classNa
   );
 };
 
-export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter }; 
+export { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogFooter, 
+  DialogTitle, 
+  DialogDescription 
+}; 

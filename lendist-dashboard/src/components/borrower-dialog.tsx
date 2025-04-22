@@ -8,11 +8,16 @@ import { Badge } from "./ui/badge"
 import { Button } from "./ui/button"
 import { Avatar, AvatarFallback } from "./ui/avatar"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table"
-import { Phone, Mail, MapPin, CreditCard, Calendar, ArrowUpRight } from "lucide-react"
+import { Phone, CreditCard, Calendar, ArrowUpRight, Loader2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
+import { useBorrower, Borrower } from "../hooks/useBorrowers"
+import { useLoansByBorrower } from "../hooks/useLoans"
+import { usePaymentsByBorrower } from "../hooks/usePayments"
+import { formatCurrency } from "../utils/format"
+import { format } from "date-fns"
 
 interface BorrowerDialogProps {
-  borrower: any
+  borrower: Borrower
   isOpen: boolean
   onClose: () => void
 }
@@ -20,50 +25,17 @@ interface BorrowerDialogProps {
 export function BorrowerDialog({ borrower, isOpen, onClose }: BorrowerDialogProps) {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState("overview")
+  
+  // Fetch detailed borrower data
+  const { data: borrowerDetails, isLoading: borrowerLoading } = useBorrower(borrower.id);
+  
+  // Fetch borrower's loans
+  const { data: loans, isLoading: loansLoading } = useLoansByBorrower(borrower.id);
+  
+  // Fetch borrower's payments
+  const { data: payments, isLoading: paymentsLoading } = usePaymentsByBorrower(borrower.id);
 
   if (!borrower) return null
-
-  // Mock data for the borrower's loans
-  const loans = [
-    {
-      id: 1,
-      amount: "₱50,000",
-      date: "2025-05-01",
-      status: "active",
-      term: "4 monthly",
-      nextPayment: "2025-06-01",
-      amountDue: "₱12,500",
-    },
-    {
-      id: 2,
-      amount: "₱50,000",
-      date: "2025-05-01",
-      status: "active",
-      term: "4 monthly",
-      nextPayment: "2025-06-01",
-      amountDue: "₱12,500",
-    },
-  ]
-
-  // Mock data for payment history
-  const payments = [
-    {
-      id: 1,
-      date: "2025-05-15",
-      amount: "₱12,500",
-      method: "Cash",
-      status: "completed",
-      loanId: 1,
-    },
-    {
-      id: 2,
-      date: "2025-04-15",
-      amount: "₱12,500",
-      method: "Bank Transfer",
-      status: "completed",
-      loanId: 2,
-    },
-  ]
 
   const getInitials = (name: string) => {
     return name
@@ -72,6 +44,19 @@ export function BorrowerDialog({ borrower, isOpen, onClose }: BorrowerDialogProp
       .join("")
       .toUpperCase()
   }
+  
+  const formatDate = (dateString: string) => {
+    try {
+      return format(new Date(dateString), "MMM d, yyyy");
+    } catch (e) {
+      return dateString;
+    }
+  };
+  
+  // Format client since date
+  const clientSinceDate = borrowerDetails?.created_at 
+    ? formatDate(borrowerDetails.created_at)
+    : "Unknown";
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -105,20 +90,12 @@ export function BorrowerDialog({ borrower, isOpen, onClose }: BorrowerDialogProp
                     <span>{borrower.mobile}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
-                    <span>{borrower.email || "email@example.com"}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <MapPin className="h-4 w-4 text-muted-foreground" />
-                    <span>{borrower.address || "Manila, Philippines"}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
                     <CreditCard className="h-4 w-4 text-muted-foreground" />
-                    <span>{borrower.activeLoans} Active Loans</span>
+                    <span>{borrowerDetails?.active_loans_count || 0} Active Loans</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <span>Client since Jan 2025</span>
+                    <span>Client since {clientSinceDate}</span>
                   </div>
                 </div>
               </CardContent>
@@ -135,57 +112,65 @@ export function BorrowerDialog({ borrower, isOpen, onClose }: BorrowerDialogProp
 
               <div className="tabs-content-container min-h-[400px]">
                 <TabsContent value="overview" className="space-y-4 h-full">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Summary</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-sm text-muted-foreground">Total Loan Amount</p>
-                          <p className="text-2xl font-bold">{borrower.totalAmount}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">Active Loans</p>
-                          <p className="text-2xl font-bold">{borrower.activeLoans}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">Next Payment</p>
-                          <p className="text-2xl font-bold">₱12,500</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">Due Date</p>
-                          <p className="text-2xl font-bold">Jun 1, 2025</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  {borrowerLoading ? (
+                    <div className="flex justify-center items-center h-60">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary/70" />
+                    </div>
+                  ) : (
+                    <>
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Summary</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-sm text-muted-foreground">Total Loan Amount</p>
+                              <p className="text-2xl font-bold">{formatCurrency(borrowerDetails?.total_principal || 0)}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-muted-foreground">Active Loans</p>
+                              <p className="text-2xl font-bold">{borrowerDetails?.active_loans_count || 0}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-muted-foreground">Total Loans</p>
+                              <p className="text-2xl font-bold">{borrowerDetails?.total_loans || 0}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-muted-foreground">Repayment Rate</p>
+                              <p className="text-2xl font-bold">{borrowerDetails?.repayment_rate || 0}%</p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
 
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Recent Activity</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        <div className="flex items-start gap-4">
-                          <div className="mt-0.5 h-2 w-2 rounded-full bg-emerald-500" />
-                          <div>
-                            <p className="font-medium">Payment received</p>
-                            <p className="text-sm text-muted-foreground">₱12,500 for Loan #1</p>
-                            <p className="text-xs text-muted-foreground mt-1">May 15, 2025</p>
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-4">
-                          <div className="mt-0.5 h-2 w-2 rounded-full bg-sky-500" />
-                          <div>
-                            <p className="font-medium">New loan created</p>
-                            <p className="text-sm text-muted-foreground">₱50,000 - 4 month term</p>
-                            <p className="text-xs text-muted-foreground mt-1">May 1, 2025</p>
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                      {payments && payments.length > 0 && (
+                        <Card>
+                          <CardHeader>
+                            <CardTitle>Recent Activity</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="space-y-4">
+                              {payments.slice(0, 2).map(payment => (
+                                <div key={payment.id} className="flex items-start gap-4">
+                                  <div className="mt-0.5 h-2 w-2 rounded-full bg-emerald-500" />
+                                  <div>
+                                    <p className="font-medium">Payment received</p>
+                                    <p className="text-sm text-muted-foreground">
+                                      {formatCurrency(payment.amount_paid)} for Loan #{payment.loan_id}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {formatDate(payment.payment_date)}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+                    </>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="loans" className="h-full">
@@ -194,47 +179,57 @@ export function BorrowerDialog({ borrower, isOpen, onClose }: BorrowerDialogProp
                       <CardTitle>Active Loans</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="hover:bg-transparent">
-                            <TableHead>AMOUNT</TableHead>
-                            <TableHead>DATE</TableHead>
-                            <TableHead>STATUS</TableHead>
-                            <TableHead>NEXT PAYMENT</TableHead>
-                            <TableHead className="text-right">ACTIONS</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {loans.map((loan) => (
-                            <TableRow key={loan.id} className="hover:bg-secondary/50">
-                              <TableCell className="font-medium">{loan.amount}</TableCell>
-                              <TableCell>{loan.date}</TableCell>
-                              <TableCell>
-                                <Badge
-                                  variant="outline"
-                                  className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
-                                >
-                                  {loan.status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>{loan.nextPayment}</TableCell>
-                              <TableCell className="text-right">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 text-primary"
-                                  onClick={() => {
-                                    onClose()
-                                    navigate(`/loans/${loan.id}`)
-                                  }}
-                                >
-                                  Details
-                                </Button>
-                              </TableCell>
+                      {loansLoading ? (
+                        <div className="flex justify-center items-center h-60">
+                          <Loader2 className="h-8 w-8 animate-spin text-primary/70" />
+                        </div>
+                      ) : loans && loans.length > 0 ? (
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="hover:bg-transparent">
+                              <TableHead>AMOUNT</TableHead>
+                              <TableHead>DATE</TableHead>
+                              <TableHead>TYPE</TableHead>
+                              <TableHead>TERM</TableHead>
+                              <TableHead className="text-right">ACTIONS</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {loans.map((loan) => (
+                              <TableRow key={loan.id} className="hover:bg-secondary/50">
+                                <TableCell className="font-medium">{formatCurrency(loan.principal)}</TableCell>
+                                <TableCell>{formatDate(loan.start_date)}</TableCell>
+                                <TableCell>
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
+                                  >
+                                    {loan.repayment_type.toLowerCase()}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>{loan.term_units} {loan.term_frequency.toLowerCase()}</TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 text-primary"
+                                    onClick={() => {
+                                      onClose()
+                                      navigate(`/loans/${loan.id}`)
+                                    }}
+                                  >
+                                    Details
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      ) : (
+                        <div className="text-center py-10 text-muted-foreground">
+                          No loans found for this borrower
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>
@@ -245,48 +240,56 @@ export function BorrowerDialog({ borrower, isOpen, onClose }: BorrowerDialogProp
                       <CardTitle>Payment History</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="hover:bg-transparent">
-                            <TableHead>DATE</TableHead>
-                            <TableHead>AMOUNT</TableHead>
-                            <TableHead>METHOD</TableHead>
-                            <TableHead>STATUS</TableHead>
-                            <TableHead>LOAN</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {payments.map((payment) => (
-                            <TableRow key={payment.id} className="hover:bg-secondary/50">
-                              <TableCell>{payment.date}</TableCell>
-                              <TableCell className="font-medium">{payment.amount}</TableCell>
-                              <TableCell>{payment.method}</TableCell>
-                              <TableCell>
-                                <Badge
-                                  variant="outline"
-                                  className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
-                                >
-                                  {payment.status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 text-primary p-0"
-                                  onClick={() => {
-                                    onClose()
-                                    navigate(`/loans/${payment.loanId}`)
-                                  }}
-                                >
-                                  Loan #{payment.loanId}
-                                  <ArrowUpRight className="ml-1 h-3 w-3" />
-                                </Button>
-                              </TableCell>
+                      {paymentsLoading ? (
+                        <div className="flex justify-center items-center h-60">
+                          <Loader2 className="h-8 w-8 animate-spin text-primary/70" />
+                        </div>
+                      ) : payments && payments.length > 0 ? (
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="hover:bg-transparent">
+                              <TableHead>DATE</TableHead>
+                              <TableHead>AMOUNT</TableHead>
+                              <TableHead>METHOD</TableHead>
+                              <TableHead>LOAN</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {payments.map((payment) => (
+                              <TableRow key={payment.id} className="hover:bg-secondary/50">
+                                <TableCell>{formatDate(payment.payment_date)}</TableCell>
+                                <TableCell className="font-medium">{formatCurrency(payment.amount_paid)}</TableCell>
+                                <TableCell>
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
+                                  >
+                                    {payment.payment_method.replace('_', ' ')}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 text-primary p-0"
+                                    onClick={() => {
+                                      onClose()
+                                      navigate(`/loans/${payment.loan_id}`)
+                                    }}
+                                  >
+                                    Loan #{payment.loan_id}
+                                    <ArrowUpRight className="ml-1 h-3 w-3" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      ) : (
+                        <div className="text-center py-10 text-muted-foreground">
+                          No payment history found
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>

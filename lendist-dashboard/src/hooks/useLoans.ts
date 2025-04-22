@@ -15,14 +15,26 @@ export interface Loan {
 }
 
 export function useLoans() {
-  return useQuery<Loan[]>(['loans'], () => 
-    api.get('/loans').then(res => res.data)
-  );
+  return useQuery<Loan[], Error>(['loans'], () => api.get('/loans').then(res => res.data));
 }
 
 export function useLoan(id: number) {
-  return useQuery<Loan>(['loan', id], () => 
-    api.get(`/loans/${id}`).then(res => res.data)
+  return useQuery<Loan, Error>(
+    ['loan', id], 
+    () => api.get(`/loans/${id}`).then(res => res.data),
+    {
+      enabled: !!id
+    }
+  );
+}
+
+export function useLoansByBorrower(borrowerId: number) {
+  return useQuery<Loan[], Error>(
+    ['loans', 'borrower', borrowerId], 
+    () => api.get(`/loans/borrower/${borrowerId}`).then(res => res.data),
+    {
+      enabled: !!borrowerId
+    }
   );
 }
 

@@ -9,8 +9,6 @@ class Borrower(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str
     mobile: str | None = None
-    email: str | None = Field(default=None, nullable=True)
-    address: str | None = Field(default=None, nullable=True)
     created_at: datetime = Field(default_factory=datetime.utcnow) 
     
     loans: List["Loan"] = Relationship(back_populates="borrower") 

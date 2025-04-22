@@ -8,7 +8,11 @@ app = FastAPI(title="Lending‑MVP")
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React dev server URL
+    allow_origins=[
+        "http://localhost:3000",  # React dev server URL
+        "http://localhost:5173",  # Vite default port
+        "http://127.0.0.1:5173",  # Vite default port alternative
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -38,7 +38,7 @@ export default function KPICards() {
 
   const kpiData = [
     { 
-      title: 'Total Loans', 
+      title: '`Total Loans', 
       value: formatCurrency(summary.total_loans_amount), 
       change: `${summary.loans_change || 0}%`, 
       status: (summary.loans_change || 0) >= 0 ? 'up' : 'down' 
