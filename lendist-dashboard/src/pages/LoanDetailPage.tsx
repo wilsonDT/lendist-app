@@ -1,451 +1,522 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { Sidebar } from "../components/sidebar"
 import { Header } from "../components/header"
 import { Button } from "../components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
+import { Card, CardContent } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table"
 import { Progress } from "../components/ui/progress"
-import { ArrowLeft, Calendar, CreditCard, DollarSign, User, Clock, FileText, CheckCircle2, PlusCircle } from "lucide-react"
+import { ArrowLeft, Calendar, CreditCard, DollarSign, User, Clock, FileText, CheckCircle2, PlusCircle, AlertCircle, RotateCw } from "lucide-react"
 import { LoanDetailPageSkeleton } from "../components/skeleton-layout"
+import { useLoan } from "../hooks/useLoans"
+import { usePaymentsByLoan, useRecalculatePayments } from "../hooks/usePayments"
+import { api } from "../api/useApi"
+import { formatCurrency } from "../lib/utils"
+import { useToast } from "../components/ui/use-toast"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
+import { PaymentStatus } from "../components/PaymentStatus"
 
-// Mock loans data - in a real app this would come from an API
-const mockLoans = [
-  {
-    id: "1",
-    borrower: "Juan Dela Cruz",
-    borrowerId: 1,
-    amount: "₱50,000",
-    date: "2025-05-01",
-    status: "active",
-    term: "4 monthly",
-    nextPayment: "2025-06-01",
-    amountDue: "₱12,500",
-    totalPaid: "₱12,500",
-    remainingAmount: "₱37,500",
-    progress: 25,
-    interestRate: "5%",
-    purpose: "Business",
-    collateral: "None",
-  },
-  {
-    id: "2",
-    borrower: "Juan Dela Cruz",
-    borrowerId: 1,
-    amount: "₱50,000",
-    date: "2025-05-01",
-    status: "active",
-    term: "4 monthly",
-    nextPayment: "2025-06-01",
-    amountDue: "₱12,500",
-    totalPaid: "₱12,500",
-    remainingAmount: "₱37,500",
-    progress: 25,
-    interestRate: "5%",
-    purpose: "Business",
-    collateral: "None",
-  },
-  {
-    id: "3",
-    borrower: "Juan Dela Cruz",
-    borrowerId: 1,
-    amount: "₱50,000",
-    date: "2025-05-01",
-    status: "active",
-    term: "4 monthly",
-    nextPayment: "2025-06-01",
-    amountDue: "₱12,500",
-    totalPaid: "₱12,500",
-    remainingAmount: "₱37,500",
-    progress: 25,
-    interestRate: "5%",
-    purpose: "Business",
-    collateral: "None",
-  },
-  {
-    id: "4",
-    borrower: "Juan Dela Cruz",
-    borrowerId: 1,
-    amount: "₱50,000",
-    date: "2025-05-01",
-    status: "active",
-    term: "4 monthly",
-    nextPayment: "2025-06-01",
-    amountDue: "₱12,500",
-    totalPaid: "₱12,500",
-    remainingAmount: "₱37,500",
-    progress: 25,
-    interestRate: "5%",
-    purpose: "Business",
-    collateral: "None",
-  },
-  {
-    id: "5",
-    borrower: "John Smith",
-    borrowerId: 2,
-    amount: "₱50,000",
-    date: "2025-05-01",
-    status: "active",
-    term: "4 monthly",
-    nextPayment: "2025-06-01",
-    amountDue: "₱12,500",
-    totalPaid: "₱12,500",
-    remainingAmount: "₱37,500",
-    progress: 25,
-    interestRate: "5%",
-    purpose: "Business",
-    collateral: "None",
-  },
-  {
-    id: "6",
-    borrower: "John Smith",
-    borrowerId: 2,
-    amount: "₱10,000",
-    date: "2025-04-20",
-    status: "active",
-    term: "4 monthly",
-    nextPayment: "2025-05-20",
-    amountDue: "₱2,500",
-    totalPaid: "₱0",
-    remainingAmount: "₱10,000",
-    progress: 0,
-    interestRate: "5%",
-    purpose: "Personal",
-    collateral: "None",
-  },
-];
+// Payment interface
+interface Payment {
+  id: number;
+  loan_id: number;
+  amount_due: number;
+  amount_paid: number;
+  due_date: string;
+  paid_at: string | null;
+}
+
+// Extend the Loan interface locally to include status
+interface ExtendedLoan {
+  id: number;
+  borrower_id: number;
+  principal: number;
+  interest_rate_percent: number;
+  term_units: number;
+  term_frequency: string;
+  repayment_type: string;
+  interest_cycle?: string;
+  start_date: string;
+  created_at: string;
+  borrower_name?: string;
+  status?: string;
+}
+
+// Add a cache outside the component to prevent refetching the same borrower
+const borrowerCache = new Map<number, string>();
+
+// Add this near the borrowerCache
+const paymentScheduleCache = new Map<number, any[]>();
+
+// Add a helper function to calculate payment amount with interest
+const calculatePaymentWithInterest = (principal: number, interestRate: number, terms: number, frequency: string = "monthly", repaymentType: string = "amortized", interestCycle: string = "yearly"): number => {
+  // Debug logs
+  console.log("Payment calculation with:", {
+    principal,
+    interestRate,
+    terms, 
+    frequency,
+    repaymentType,
+    interestCycle
+  });
+  
+  // Calculate annual interest rate equivalent based on the interest cycle
+  const getAnnualizedInterestRate = (): number => {
+    switch (interestCycle.toLowerCase()) {
+      case "one-time":
+        return interestRate; // One-time interest
+      case "daily":
+        return interestRate * 365; // Daily interest to annual
+      case "weekly":
+        return interestRate * 52; // Weekly interest to annual
+      case "monthly":
+        return interestRate * 12; // Monthly interest to annual
+      case "yearly":
+        return interestRate; // Already annual
+      default:
+        return interestRate; // Default to annual
+    }
+  };
+  
+  // Get periodic interest rate based on payment frequency
+  const getPeriodicInterestRate = (): number => {
+    const annualRate = getAnnualizedInterestRate();
+    
+    switch (frequency.toLowerCase()) {
+      case "daily":
+        return annualRate / 365;
+      case "weekly":
+        return annualRate / 52;
+      case "monthly":
+        return annualRate / 12;
+      case "quarterly":
+        return annualRate / 4;
+      case "yearly":
+        return annualRate;
+      default:
+        return annualRate / 12; // Default to monthly
+    }
+  };
+  
+  // Get the periodic interest rate for calculations
+  const periodicRate = getPeriodicInterestRate() / 100; // Convert percentage to decimal
+  console.log("Periodic rate:", periodicRate);
+
+  if (repaymentType.toLowerCase() === "flat") {
+    // Flat loans: interest is calculated on the full principal amount,
+    // and the principal is distributed evenly across all payments
+    const interestPerPeriod = principal * periodicRate;
+    const principalPerPeriod = principal / terms;
+    
+    const payment = principalPerPeriod + interestPerPeriod;
+    console.log("Flat payment calculation:", {
+      interestPerPeriod,
+      principalPerPeriod,
+      payment
+    });
+    return payment;
+  } else {
+    // Amortized loans: equal payments including both principal and interest
+    // Use formula: P * r * (1 + r)^n / ((1 + r)^n - 1)
+    if (periodicRate === 0) return principal / terms; // Handle zero interest case
+
+    const numerator = periodicRate * Math.pow(1 + periodicRate, terms);
+    const denominator = Math.pow(1 + periodicRate, terms) - 1;
+    
+    // Handle edge case to avoid division by zero
+    if (denominator === 0) return principal / terms;
+    
+    const payment = principal * (numerator / denominator);
+    console.log("Amortized payment calculation:", {
+      numerator,
+      denominator,
+      payment
+    });
+    return payment;
+  }
+};
 
 export default function LoanDetailPage() {
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
-  const [activeTab, setActiveTab] = useState("schedule")
-  const [loan, setLoan] = useState<any>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [paymentSchedule, setPaymentSchedule] = useState<any[]>([])
-  const [loanActivity, setLoanActivity] = useState<any[]>([])
+  const [activeTab, setActiveTab] = useState("payment")
+  const { toast } = useToast()
+  
+  // Log the ID to debug
+  console.log("Loan ID from URL params:", id, "type:", typeof id)
+  
+  // Only parse if needed and ensure we have a valid ID
+  const loanId = id ? (isNaN(Number(id)) ? 0 : Number(id)) : 0
+  console.log("Parsed loan ID:", loanId)
+  
+  const { data: loanData, isLoading: loanLoading, error: loanError } = useLoan(loanId)
+  const { data: payments, isLoading: paymentsLoading, error: paymentsError, refetch } = usePaymentsByLoan(loanId, true)
+  
+  // Add the recalculate mutation
+  const recalculatePaymentsMutation = useRecalculatePayments()
 
+  // Cast loan to ExtendedLoan and add default status if missing
+  const loan: ExtendedLoan | undefined = loanData ? {
+    ...loanData,
+    status: "active" // Default status if not provided by API
+  } : undefined;
+  
+  // Log the error if there is one
   useEffect(() => {
-    // Simulate API fetch with a small delay
-    const timer = setTimeout(() => {
-      const foundLoan = mockLoans.find(loan => loan.id === id)
-      setLoan(foundLoan || null)
-      setIsLoading(false)
-      if (foundLoan) {
-        setPaymentSchedule(generatePaymentSchedule(foundLoan))
-        setLoanActivity(generateLoanActivity(foundLoan))
-      }
-    }, 300)
-
-    return () => clearTimeout(timer)
-  }, [id])
-
-  // Mock payment schedule based on the loan
-  const generatePaymentSchedule = (loan: any) => {
-    if (!loan) return []
-    
-    // Extract the number of payments from the term (assuming format like "4 monthly")
-    const numPayments = parseInt(loan.term.split(" ")[0])
-    
-    // Calculate payment amount (simplistic calculation)
-    const paymentAmount = loan.amountDue
-    
-    // Extract loan start date
-    const startDate = new Date(loan.date)
-    
-    const payments = []
-    for (let i = 0; i < numPayments; i++) {
-      const dueDate = new Date(startDate)
-      dueDate.setMonth(startDate.getMonth() + i)
-      
-      const isCompleted = i === 0 && loan.progress > 0
-      
-      payments.push({
-        id: i + 1,
-        dueDate: dueDate.toISOString().split('T')[0],
-        amount: paymentAmount,
-        status: isCompleted ? "paid" : "upcoming",
-        paidDate: isCompleted ? "2025-05-15" : null,
-      })
+    if (loanError) {
+      console.error("Error fetching loan:", loanError)
     }
-    
-    return payments
-  }
+  }, [loanError])
+  
+  const [paymentSchedule, setPaymentSchedule] = useState<Payment[]>([])
+  const [paymentProgress, setPaymentProgress] = useState(0)
+  const [totalPaid, setTotalPaid] = useState(0)
+  const [borrowerName, setBorrowerName] = useState<string>("")
 
-  // Mock loan activity based on payment schedule
-  const generateLoanActivity = (loan: any) => {
-    if (!loan) return []
-    
-    const activities = [
-      {
-        id: 1,
-        date: loan.date,
-        type: "creation",
-        description: "Loan created",
-        amount: loan.amount,
+  // Combined loading and error state
+  const isLoading = loanLoading || paymentsLoading;
+  const error = loanError || paymentsError;
+
+  // Fetch borrower name (keep this useEffect, maybe simplify)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchBorrowerData = async () => {
+      if (!loan || !loan.borrower_id) return;
+      
+      // Check if we already have this borrower in our cache
+      if (borrowerCache.has(loan.borrower_id)) {
+        setBorrowerName(borrowerCache.get(loan.borrower_id) || "");
+        return;
       }
-    ]
+      
+      try {
+        console.log(`Fetching borrower with ID: ${loan.borrower_id}`);
+        const response = await api.get(`/borrowers/${loan.borrower_id}`);
+        console.log("Borrower API response:", response.data);
+        
+        // Make sure we're accessing the right property and component is still mounted
+        if (response.data && response.data.name && isMounted) {
+          // Store in cache for future use
+          borrowerCache.set(loan.borrower_id, response.data.name);
+          setBorrowerName(response.data.name);
+        } else if (isMounted) {
+          console.warn("Borrower response missing name property:", response.data);
+          setBorrowerName(`Borrower #${loan.borrower_id}`);
+        }
+      } catch (err) {
+        console.error("Error fetching borrower:", err);
+        if (isMounted) setBorrowerName(`Borrower #${loan.borrower_id}`);
+      }
+    };
+    if (loan) fetchBorrowerData();
+    return () => { isMounted = false; };
+  }, [loan]); // Only depends on loan
+
+  // Process fetched payment data (keep this)
+  useEffect(() => {
+    if (payments && loan) {
+      // Use the fetched payments directly
+      setPaymentSchedule(payments);
+
+      // Calculate progress based on fetched payments
+      let totalPaidAmount = 0;
+      payments.forEach(p => { totalPaidAmount += p.amount_paid || 0; });
+      setTotalPaid(totalPaidAmount);
+
+      const progress = loan.principal > 0 
+        ? Math.min(100, Math.round((totalPaidAmount / loan.principal) * 100))
+        : 0;
+      setPaymentProgress(progress);
+    }
+  }, [payments, loan]); // Re-run when payments or loan data changes
+
+  // Handle payment recalculation
+  const handleRecalculatePayments = () => {
+    if (!loan) return;
     
-    // Add payment activities for paid payments
-    const paidPayments = paymentSchedule.filter(p => p.status === "paid")
-    paidPayments.forEach((payment, index) => {
-      activities.push({
-        id: activities.length + 1,
-        date: payment.paidDate,
-        type: "payment",
-        description: "Payment received",
-        amount: payment.amount,
-      })
-    })
-    
-    return activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-  }
+    recalculatePaymentsMutation.mutate(loan.id, {
+      onSuccess: () => {
+        toast({
+          title: "Success",
+          description: "Payment schedule recalculated successfully!",
+          variant: "default"
+        });
+        refetch(); // Refresh the payments data
+      },
+      onError: (error) => {
+        console.error("Error recalculating payments:", error);
+        toast({
+          title: "Error",
+          description: "Failed to recalculate payment schedule. Please try again.",
+          variant: "destructive"
+        });
+      }
+    });
+  };
 
   if (isLoading) {
     return <LoanDetailPageSkeleton />
   }
 
-  if (!loan) {
+  if (error || !loan) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-xl font-semibold mb-2">Loan Not Found</h2>
-          <p className="text-muted-foreground mb-4">The loan you're looking for doesn't exist.</p>
-          <Button onClick={() => navigate("/loans")}>
-            Back to Loans
-          </Button>
-        </div>
+      <div className="flex h-screen flex-col items-center justify-center p-4 text-center">
+        <h1 className="text-2xl font-bold">
+          {error ? "Error Loading Loan" : "Loan Not Found"}
+        </h1>
+        <p className="mt-2 text-muted-foreground">
+          {error ? error.message : "The loan you're looking for doesn't exist."}
+        </p>
+        <Button onClick={() => navigate("/loans")} className="mt-4">
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to Loans
+        </Button>
       </div>
     )
   }
 
+  // Example: Next Payment Card
+  const firstUnpaidOrPartial = paymentSchedule.find(p => !p.paid_at || (p.amount_paid < p.amount_due));
+  const nextPaymentDisplayAmount = firstUnpaidOrPartial ? firstUnpaidOrPartial.amount_due : 0;
+  const nextPaymentDisplayDate = firstUnpaidOrPartial ? firstUnpaidOrPartial.due_date : "N/A";
+
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="min-h-screen flex">
       <Sidebar />
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1">
         <Header title="Loan Details" />
         <main className="p-6">
-          <div className="flex items-center mb-6">
-            <Button variant="ghost" size="sm" className="gap-1" onClick={() => navigate("/loans")}>
+          <div className="flex justify-between items-center mb-6">
+            <Button onClick={() => navigate("/loans")} variant="outline" size="sm" className="gap-2">
               <ArrowLeft className="h-4 w-4" />
               Back to Loans
             </Button>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-3 mb-6">
-            <Card className="border-border/40">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Loan Amount</CardTitle>
-                <CardDescription>Total loan value</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center">
-                  <DollarSign className="h-5 w-5 mr-2 text-primary" />
-                  <span className="text-2xl font-bold">{loan.amount}</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-border/40">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Next Payment</CardTitle>
-                <CardDescription>Due on {loan.nextPayment}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center">
-                  <Calendar className="h-5 w-5 mr-2 text-amber-500" />
-                  <span className="text-2xl font-bold">{loan.amountDue}</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-border/40">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Loan Progress</CardTitle>
-                <CardDescription>{loan.progress}% completed</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Progress value={loan.progress} className="h-2 mt-2" />
-                <div className="flex justify-between mt-2 text-sm text-muted-foreground">
-                  <span>Paid: {loan.totalPaid}</span>
-                  <span>Remaining: {loan.remainingAmount}</span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            <div className="md:col-span-1">
-              <Card className="border-border/40">
-                <CardHeader>
-                  <CardTitle>Loan Information</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center">
-                      <User className="h-4 w-4 mr-2 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">Borrower</span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 p-0 font-medium"
-                      onClick={() => navigate(`/borrowers/${loan.borrowerId}`)}
-                    >
-                      {loan.borrower}
-                    </Button>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center">
-                      <Calendar className="h-4 w-4 mr-2 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">Start Date</span>
-                    </div>
-                    <span>{loan.date}</span>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center">
-                      <Clock className="h-4 w-4 mr-2 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">Term</span>
-                    </div>
-                    <span>{loan.term}</span>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center">
-                      <DollarSign className="h-4 w-4 mr-2 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">Interest Rate</span>
-                    </div>
-                    <span>{loan.interestRate}</span>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center">
-                      <FileText className="h-4 w-4 mr-2 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">Purpose</span>
-                    </div>
-                    <span>{loan.purpose}</span>
-                  </div>
-
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center">
-                      <CreditCard className="h-4 w-4 mr-2 text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">Status</span>
-                    </div>
-                    <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
-                      {loan.status}
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <div className="mt-6 flex flex-col gap-2">
-                <Button className="w-full">Record Payment</Button>
-                <Button variant="outline" className="w-full">
-                  Edit Loan
-                </Button>
-              </div>
+            <div className="flex gap-2">
+              <Button onClick={handleRecalculatePayments} variant="outline" size="sm">
+                Recalculate Payments
+              </Button>
+              <Button onClick={() => navigate(`/loans/${loanId}/repay`)} variant="default" size="sm">
+                Record Payment
+              </Button>
             </div>
+          </div>
 
-            <div className="md:col-span-2">
-              <Tabs defaultValue="schedule" value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid grid-cols-2 mb-4">
-                  <TabsTrigger value="schedule">Payment Schedule</TabsTrigger>
-                  <TabsTrigger value="activity">Loan Activity</TabsTrigger>
-                </TabsList>
+          {/* Top cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            {/* Loan Amount */}
+            <Card>
+              <CardContent className="p-6">
+                <h3 className="font-semibold text-lg">Loan Amount</h3>
+                <p className="text-sm text-muted-foreground">Total loan value</p>
+                <div className="flex items-center mt-2">
+                  <DollarSign className="h-6 w-6 text-primary mr-2" />
+                  <span className="text-2xl font-bold">₱{formatCurrency(loan.principal)}</span>
+                </div>
+              </CardContent>
+            </Card>
 
-                <TabsContent value="schedule">
-                  <Card className="border-border/40">
-                    <CardHeader>
-                      <CardTitle>Payment Schedule</CardTitle>
-                      <CardDescription>Upcoming and past payments</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex justify-between items-center mb-4">
-                        <h3 className="font-medium">Upcoming Payments</h3>
-                        <Button variant="outline" size="sm">
-                          <PlusCircle className="mr-2 h-4 w-4" />
-                          Add Payment
-                        </Button>
+            {/* Next Payment */}
+            <Card>
+              <CardContent className="p-6">
+                <h3 className="font-semibold text-lg">Next Payment</h3>
+                <p className="text-sm text-muted-foreground">
+                  Due on {nextPaymentDisplayDate}
+                </p>
+                <div className="flex items-center mt-2">
+                  <Calendar className="h-6 w-6 text-primary mr-2" />
+                  <span className="text-2xl font-bold">
+                    ₱{formatCurrency(nextPaymentDisplayAmount)}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Loan Progress */}
+            <Card>
+              <CardContent className="p-6">
+                <h3 className="font-semibold text-lg">Loan Progress</h3>
+                <p className="text-sm text-muted-foreground">{paymentProgress}% completed</p>
+                <Progress value={paymentProgress} className="mt-2 h-2" />
+                <div className="flex justify-between text-sm mt-2">
+                  <span>Paid: ₱{formatCurrency(totalPaid)}</span>
+                  <span>Remaining: ₱{formatCurrency(loan.principal - totalPaid)}</span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Loan Information */}
+            <Card className="md:col-span-1">
+              <CardContent className="p-6">
+                <h3 className="font-semibold text-lg mb-4">Loan Information</h3>
+                
+                <div className="space-y-4">
+                  <div className="flex items-start">
+                    <User className="h-5 w-5 text-primary mt-0.5 mr-3" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Borrower</p>
+                      <p className="font-medium">
+                        {borrowerName || `Borrower #${loan.borrower_id}`}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-start">
+                    <Calendar className="h-5 w-5 text-primary mt-0.5 mr-3" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Start Date</p>
+                      <p className="font-medium">{loan.start_date}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-start">
+                    <Clock className="h-5 w-5 text-primary mt-0.5 mr-3" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Term</p>
+                      <p className="font-medium">{loan.term_units} {loan.term_frequency}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-start">
+                    <DollarSign className="h-5 w-5 text-primary mt-0.5 mr-3" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Interest Rate</p>
+                      <p className="font-medium">{loan.interest_rate_percent}%</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-start">
+                    <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 mr-3" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Status</p>
+                      <div className="mt-1 flex items-center">
+                        <div className={`rounded-full h-2 w-2 mr-2 ${loan.status === "active" ? "bg-emerald-500" : "bg-gray-500"}`}></div>
+                        <span>active</span>
                       </div>
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="hover:bg-transparent">
-                            <TableHead>DUE DATE</TableHead>
-                            <TableHead>AMOUNT</TableHead>
-                            <TableHead>STATUS</TableHead>
-                            <TableHead>PAID DATE</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-start">
+                    <Clock className="h-5 w-5 text-primary mt-0.5 mr-3" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Interest Cycle</p>
+                      <p className="font-medium">{loan?.interest_cycle || "Yearly"}</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="mt-6 space-y-3">
+                  <Button 
+                    className="w-full"
+                    onClick={() => navigate(`/loans/${loan.id}/payment`)}
+                  >
+                    Record Payment
+                  </Button>
+                  
+                  <Button 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={handleRecalculatePayments}
+                    disabled={recalculatePaymentsMutation.isLoading}
+                  >
+                    <RotateCw className="mr-2 h-4 w-4" />
+                    {recalculatePaymentsMutation.isLoading ? "Recalculating..." : "Recalculate Payments"}
+                  </Button>
+                  
+                  <Button variant="outline" className="w-full">Edit Loan</Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Payment Schedule and Activity */}
+            <Card className="md:col-span-2">
+              <CardContent className="p-6">
+                <div className="flex space-x-2 mb-6">
+                  <Button 
+                    variant={activeTab === "payment" ? "default" : "outline"}
+                    onClick={() => setActiveTab("payment")}
+                    className="flex-1"
+                  >
+                    Payment Schedule
+                  </Button>
+                  <Button 
+                    variant={activeTab === "activity" ? "default" : "outline"}
+                    onClick={() => setActiveTab("activity")}
+                    className="flex-1"
+                  >
+                    Loan Activity
+                  </Button>
+                </div>
+
+                {activeTab === "payment" && (
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3">Payment Schedule</h3>
+                    <p className="text-sm text-muted-foreground mb-6">Upcoming and past payments</p>
+                    
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="border-b border-border">
+                            <th className="text-left py-3 px-4 font-medium text-muted-foreground">DUE DATE</th>
+                            <th className="text-left py-3 px-4 font-medium text-muted-foreground">AMOUNT</th>
+                            <th className="text-left py-3 px-4 font-medium text-muted-foreground">STATUS</th>
+                            <th className="text-left py-3 px-4 font-medium text-muted-foreground">PAID DATE</th>
+                          </tr>
+                        </thead>
+                        <tbody>
                           {paymentSchedule.map((payment) => (
-                            <TableRow key={payment.id} className="hover:bg-secondary/50">
-                              <TableCell>{payment.dueDate}</TableCell>
-                              <TableCell className="font-medium">{payment.amount}</TableCell>
-                              <TableCell>
-                                {payment.status === "paid" ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
-                                  >
-                                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                                    Paid
-                                  </Badge>
-                                ) : (
-                                  <Badge
-                                    variant="outline"
-                                    className="bg-amber-500/10 text-amber-500 border-amber-500/20"
-                                  >
-                                    Upcoming
-                                  </Badge>
-                                )}
-                              </TableCell>
-                              <TableCell>{payment.paidDate || "-"}</TableCell>
-                            </TableRow>
+                            <tr key={payment.id} className="border-b border-border">
+                              <td className="py-4 px-4">{payment.due_date}</td>
+                              <td className="py-4 px-4 font-medium">₱{formatCurrency(payment.amount_due)}</td>
+                              <td className="py-4 px-4">
+                                <PaymentStatus payment={payment} />
+                              </td>
+                              <td className="py-4 px-4">{payment.paid_at ? payment.paid_at.split('T')[0] : "-"}</td>
+                            </tr>
                           ))}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
 
-                <TabsContent value="activity">
-                  <Card className="border-border/40">
-                    <CardHeader>
-                      <CardTitle>Loan Activity</CardTitle>
-                      <CardDescription>History of loan events</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="relative pl-6 space-y-6 before:absolute before:left-2 before:top-2 before:bottom-0 before:w-[2px] before:bg-border">
-                        {loanActivity.map((activity) => (
-                          <div key={activity.id} className="relative pb-6">
-                            <div className="absolute left-[-22px] h-4 w-4 rounded-full bg-secondary border-2 border-primary" />
-                            <div className="flex flex-col">
-                              <div className="flex items-center justify-between">
-                                <p className="font-medium">{activity.description}</p>
-                                <Badge
-                                  variant="outline"
-                                  className={
-                                    activity.type === "payment"
-                                      ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
-                                      : "bg-sky-500/10 text-sky-500 border-sky-500/20"
-                                  }
-                                >
-                                  {activity.amount}
-                                </Badge>
-                              </div>
-                              <p className="text-sm text-muted-foreground mt-1">{activity.date}</p>
-                            </div>
-                          </div>
-                        ))}
+                {activeTab === "activity" && (
+                  <div>
+                    <h3 className="text-lg font-semibold mb-3">Loan Activity</h3>
+                    <p className="text-sm text-muted-foreground mb-6">History of loan events</p>
+                    
+                    <div className="space-y-4">
+                      <div className="flex justify-between p-4 border border-border rounded-lg">
+                        <div>
+                          <p className="font-medium">Loan created</p>
+                          <p className="text-sm text-muted-foreground mt-1">{loan.start_date}</p>
+                        </div>
+                        <Badge variant="outline">Created</Badge>
                       </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              </Tabs>
-            </div>
+                      
+                      {paymentSchedule
+                        .filter(payment => payment.paid_at)
+                        .sort((a, b) => new Date(b.paid_at || '').getTime() - new Date(a.paid_at || '').getTime())
+                        .map(payment => (
+                          <div key={payment.id} className="flex justify-between p-4 border border-border rounded-lg">
+                            <div>
+                              <p className="font-medium">Payment received</p>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {payment.paid_at ? payment.paid_at.split('T')[0] : ""}
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+                              ₱{formatCurrency(payment.amount_paid)}
+                            </Badge>
+                          </div>
+                        ))
+                      }
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </main>
       </div>

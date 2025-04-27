@@ -21,12 +21,12 @@ export interface RecentPayment {
   payment_method: string;
 }
 
-export function usePaymentsByLoan(loanId: number) {
+export function usePaymentsByLoan(loanId: number, recalculate: boolean = false) {
   return useQuery<Payment[], Error>(
-    ['payments', 'loan', loanId], 
+    ['payments', 'loan', loanId, { recalculate }], 
     async () => {
       try {
-        const response: AxiosResponse<Payment[]> = await api.get(`/payments/loan/${loanId}`);
+        const response: AxiosResponse<Payment[]> = await api.get(`/payments/loan/${loanId}?recalculate=${recalculate}`);
         return response.data;
       } catch (error) {
         console.error(`Failed to fetch payments for loan ${loanId}:`, error);
@@ -89,6 +89,24 @@ export function useCollectPayment() {
         queryClient.invalidateQueries(['loan', variables.loan_id]);
         queryClient.invalidateQueries(['loans']);
         queryClient.invalidateQueries(['payments', 'loan', variables.loan_id]);
+        queryClient.invalidateQueries(['dashboardSummary']);
+      }
+    }
+  );
+}
+
+// Add a mutation to recalculate a loan's payment schedule
+export function useRecalculatePayments() {
+  const queryClient = useQueryClient();
+  
+  return useMutation<any, Error, number>(
+    (loanId: number) => api.post(`/payments/loan/${loanId}/recalculate`).then(res => res.data),
+    {
+      onSuccess: (data, loanId) => {
+        // Invalidate related queries
+        queryClient.invalidateQueries(['loan', loanId]);
+        queryClient.invalidateQueries(['payments', 'loan', loanId]);
+        queryClient.invalidateQueries(['loans']);
         queryClient.invalidateQueries(['dashboardSummary']);
       }
     }
