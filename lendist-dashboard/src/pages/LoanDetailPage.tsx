@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { useParams, useNavigate } from "react-router-dom"
+import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { Sidebar } from "../components/sidebar"
 import { Header } from "../components/header"
 import { Button } from "../components/ui/button"
@@ -47,6 +47,12 @@ const borrowerCache = new Map<number, string>();
 
 // Add this near the borrowerCache
 const paymentScheduleCache = new Map<number, any[]>();
+
+// Helper function to capitalize first letter
+const capitalizeFirstLetter = (str: string): string => {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+};
 
 // Add a helper function to calculate payment amount with interest
 const calculatePaymentWithInterest = (principal: number, interestRate: number, terms: number, frequency: string = "monthly", repaymentType: string = "amortized", interestCycle: string = "yearly"): number => {
@@ -138,6 +144,7 @@ const calculatePaymentWithInterest = (principal: number, interestRate: number, t
 
 export default function LoanDetailPage() {
   const navigate = useNavigate()
+  const location = useLocation() // Add this to detect navigation from payment page
   const { id } = useParams<{ id: string }>()
   const [activeTab, setActiveTab] = useState("payment")
   const { toast } = useToast()
@@ -149,16 +156,19 @@ export default function LoanDetailPage() {
   const loanId = id ? (isNaN(Number(id)) ? 0 : Number(id)) : 0
   console.log("Parsed loan ID:", loanId)
   
-  const { data: loanData, isLoading: loanLoading, error: loanError } = useLoan(loanId)
-  const { data: payments, isLoading: paymentsLoading, error: paymentsError, refetch } = usePaymentsByLoan(loanId, true)
+  const { data: loanData, isLoading: loanLoading, error: loanError, refetch: refetchLoan } = useLoan(loanId)
+  const { data: payments, isLoading: paymentsLoading, error: paymentsError, refetch: refetchPayments } = usePaymentsByLoan(loanId, true)
   
   // Add the recalculate mutation
   const recalculatePaymentsMutation = useRecalculatePayments()
 
-  // Cast loan to ExtendedLoan and add default status if missing
+  // State for loan status
+  const [loanStatus, setLoanStatus] = useState<string>("active")
+  
+  // Cast loan to ExtendedLoan with dynamic status based on payments
   const loan: ExtendedLoan | undefined = loanData ? {
     ...loanData,
-    status: "active" // Default status if not provided by API
+    status: loanStatus // Use the status from state
   } : undefined;
   
   // Log the error if there is one
@@ -167,10 +177,22 @@ export default function LoanDetailPage() {
       console.error("Error fetching loan:", loanError)
     }
   }, [loanError])
+
+  // Add effect to refresh data when returning from payment page
+  useEffect(() => {
+    // Refetch data when user returns to this page
+    const refreshData = async () => {
+      await refetchLoan();
+      await refetchPayments();
+    };
+    
+    refreshData();
+  }, [location.key, refetchLoan, refetchPayments]);
   
   const [paymentSchedule, setPaymentSchedule] = useState<Payment[]>([])
   const [paymentProgress, setPaymentProgress] = useState(0)
   const [totalPaid, setTotalPaid] = useState(0)
+  const [totalDue, setTotalDue] = useState(0)
   const [borrowerName, setBorrowerName] = useState<string>("")
 
   // Combined loading and error state
@@ -218,15 +240,33 @@ export default function LoanDetailPage() {
       // Use the fetched payments directly
       setPaymentSchedule(payments);
 
-      // Calculate progress based on fetched payments
+      // Calculate total amount due (principal + interest)
+      let totalAmount = 0;
+      payments.forEach(p => { totalAmount += p.amount_due; });
+      setTotalDue(totalAmount);
+
+      // Calculate total paid
       let totalPaidAmount = 0;
       payments.forEach(p => { totalPaidAmount += p.amount_paid || 0; });
       setTotalPaid(totalPaidAmount);
 
-      const progress = loan.principal > 0 
-        ? Math.min(100, Math.round((totalPaidAmount / loan.principal) * 100))
+      // Calculate progress based on total amount due, not just principal
+      const progress = totalAmount > 0 
+        ? Math.min(100, Math.round((totalPaidAmount / totalAmount) * 100))
         : 0;
       setPaymentProgress(progress);
+
+      // Check if all payments are complete
+      const allPaymentsComplete = payments.every(p => p.paid_at !== null && p.amount_paid >= p.amount_due);
+      const anyPaymentsMade = payments.some(p => p.paid_at !== null && p.amount_paid > 0);
+      
+      if (allPaymentsComplete) {
+        setLoanStatus("completed");
+      } else if (anyPaymentsMade) {
+        setLoanStatus("active");
+      } else {
+        setLoanStatus("active");
+      }
     }
   }, [payments, loan]); // Re-run when payments or loan data changes
 
@@ -241,7 +281,7 @@ export default function LoanDetailPage() {
           description: "Payment schedule recalculated successfully!",
           variant: "default"
         });
-        refetch(); // Refresh the payments data
+        refetchPayments(); // Refresh the payments data
       },
       onError: (error) => {
         console.error("Error recalculating payments:", error);
@@ -339,7 +379,7 @@ export default function LoanDetailPage() {
                 <Progress value={paymentProgress} className="mt-2 h-2" />
                 <div className="flex justify-between text-sm mt-2">
                   <span>Paid: ₱{formatCurrency(totalPaid)}</span>
-                  <span>Remaining: ₱{formatCurrency(loan.principal - totalPaid)}</span>
+                  <span>Remaining: ₱{formatCurrency(totalDue - totalPaid)}</span>
                 </div>
               </CardContent>
             </Card>
@@ -391,8 +431,12 @@ export default function LoanDetailPage() {
                     <div>
                       <p className="text-sm text-muted-foreground">Status</p>
                       <div className="mt-1 flex items-center">
-                        <div className={`rounded-full h-2 w-2 mr-2 ${loan.status === "active" ? "bg-emerald-500" : "bg-gray-500"}`}></div>
-                        <span>active</span>
+                        <div className={`rounded-full h-2 w-2 mr-2 ${
+                          loan.status === "completed" ? "bg-blue-500" : 
+                          loan.status === "active" ? "bg-emerald-500" : 
+                          "bg-gray-500"
+                        }`}></div>
+                        <span>{capitalizeFirstLetter(loan.status || "active")}</span>
                       </div>
                     </div>
                   </div>
@@ -401,7 +445,7 @@ export default function LoanDetailPage() {
                     <Clock className="h-5 w-5 text-primary mt-0.5 mr-3" />
                     <div>
                       <p className="text-sm text-muted-foreground">Interest Cycle</p>
-                      <p className="font-medium">{loan?.interest_cycle || "Yearly"}</p>
+                      <p className="font-medium">{capitalizeFirstLetter(loan.interest_cycle || "yearly")}</p>
                     </div>
                   </div>
                 </div>
@@ -409,7 +453,7 @@ export default function LoanDetailPage() {
                 <div className="mt-6 space-y-3">
                   <Button 
                     className="w-full"
-                    onClick={() => navigate(`/loans/${loan.id}/payment`)}
+                    onClick={() => navigate(`/loans/${loan.id}/repay`)}
                   >
                     Record Payment
                   </Button>

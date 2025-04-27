@@ -37,7 +37,7 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
     frequency: "monthly",
     repaymentType: "flat",
     startDate: "",
-    interestCycle: "yearly",
+    interestCycle: "monthly",
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -101,6 +101,7 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
         term_units: parseInt(formData.term, 10),
         term_frequency: formData.frequency,
         repayment_type: formData.repaymentType,
+        interest_cycle: formData.interestCycle,
         start_date: formData.startDate,
         status: "active",
       }

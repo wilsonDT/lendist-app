@@ -50,11 +50,17 @@ export function RepaymentSchedulePreview({
       }
     };
 
+    // Handle one-time interest vs other interest cycles
+    const isOneTimeInterest = interestCycle.toLowerCase() === "one-time";
+    
     // Calculate annual interest rate equivalent based on the interest cycle
+    // Only used for recurring interest types (not one-time)
     const getAnnualizedInterestRate = (): number => {
+      if (isOneTimeInterest) {
+        return interestRate; // Just return the rate for one-time interest
+      }
+      
       switch (interestCycle.toLowerCase()) {
-        case "one-time":
-          return interestRate; // One-time interest
         case "daily":
           return interestRate * 365; // Daily interest to annual
         case "weekly":
@@ -70,6 +76,12 @@ export function RepaymentSchedulePreview({
     
     // Get periodic interest rate based on payment frequency
     const getPeriodicInterestRate = (): number => {
+      // For one-time interest, we distribute it evenly across all payments
+      if (isOneTimeInterest) {
+        return interestRate / termUnits;
+      }
+      
+      // For recurring interest, we calculate the periodic rate
       const annualRate = getAnnualizedInterestRate();
       
       switch (frequency.toLowerCase()) {
@@ -94,46 +106,95 @@ export function RepaymentSchedulePreview({
     if (repaymentType.toLowerCase() === "flat") {
       // Flat loans: interest is calculated on the full principal amount,
       // and the principal is distributed evenly across all payments
-      const interestPerPeriod = (principal * periodicRate) / 100;
-      const principalPerPeriod = principal / termUnits;
       
-      for (let i = 0; i < termUnits; i++) {
-        const amount = principalPerPeriod + interestPerPeriod;
+      // If it's one-time interest and there's only one term, add all interest to the first payment
+      if (isOneTimeInterest && termUnits === 1) {
+        const fullInterest = (principal * interestRate) / 100;
+        const principalPerPeriod = principal;
         
         payments.push({
-          id: i + 1,
+          id: 1,
           dueDate: new Date(currentDate),
-          amount: parseFloat(amount.toFixed(2)),
+          amount: parseFloat((principalPerPeriod + fullInterest).toFixed(2)),
           principal: principalPerPeriod,
-          interest: interestPerPeriod,
-          remainingPrincipal: parseFloat((principal - principalPerPeriod * (i + 1)).toFixed(2))
+          interest: fullInterest,
+          remainingPrincipal: 0
         });
+      } else {
+        // Normal flat interest calculation (distributed across terms)
+        const interestPerPeriod = (principal * periodicRate) / 100;
+        const principalPerPeriod = principal / termUnits;
         
-        currentDate = getNextPaymentDate(currentDate);
+        for (let i = 0; i < termUnits; i++) {
+          const amount = principalPerPeriod + interestPerPeriod;
+          
+          payments.push({
+            id: i + 1,
+            dueDate: new Date(currentDate),
+            amount: parseFloat(amount.toFixed(2)),
+            principal: principalPerPeriod,
+            interest: interestPerPeriod,
+            remainingPrincipal: parseFloat((principal - principalPerPeriod * (i + 1)).toFixed(2))
+          });
+          
+          currentDate = getNextPaymentDate(currentDate);
+        }
       }
     } else {
       // Amortized loans: equal payments including both principal and interest
-      const rate = periodicRate / 100;
-      const payment = principal * rate / (1 - Math.pow(1 + rate, -termUnits));
       
-      let remainingPrincipal = principal;
-      
-      for (let i = 0; i < termUnits; i++) {
-        const interestPayment = remainingPrincipal * rate;
-        const principalPayment = payment - interestPayment;
+      // For one-time interest with amortized loans, treat it specially
+      if (isOneTimeInterest) {
+        const totalInterest = (principal * interestRate) / 100;
+        const totalAmount = principal + totalInterest;
+        const paymentAmount = totalAmount / termUnits;
+        let remainingTotal = totalAmount;
+        let remainingPrincipal = principal;
         
-        remainingPrincipal -= principalPayment;
+        for (let i = 0; i < termUnits; i++) {
+          // Calculate proportion of interest vs principal for this payment
+          const proportion = remainingPrincipal / remainingTotal;
+          const principalPayment = Math.min(paymentAmount * proportion, remainingPrincipal);
+          const interestPayment = paymentAmount - principalPayment;
+          
+          remainingPrincipal -= principalPayment;
+          remainingTotal -= paymentAmount;
+          
+          payments.push({
+            id: i + 1,
+            dueDate: new Date(currentDate),
+            amount: parseFloat(paymentAmount.toFixed(2)),
+            principal: parseFloat(principalPayment.toFixed(2)),
+            interest: parseFloat(interestPayment.toFixed(2)),
+            remainingPrincipal: parseFloat(remainingPrincipal.toFixed(2)),
+          });
+          
+          currentDate = getNextPaymentDate(currentDate);
+        }
+      } else {
+        // Standard amortized calculation for recurring interest
+        const rate = periodicRate / 100;
+        const payment = principal * rate / (1 - Math.pow(1 + rate, -termUnits));
         
-        payments.push({
-          id: i + 1,
-          dueDate: new Date(currentDate),
-          amount: parseFloat(payment.toFixed(2)),
-          principal: parseFloat(principalPayment.toFixed(2)),
-          interest: parseFloat(interestPayment.toFixed(2)),
-          remainingPrincipal: parseFloat(remainingPrincipal.toFixed(2)),
-        });
+        let remainingPrincipal = principal;
         
-        currentDate = getNextPaymentDate(currentDate);
+        for (let i = 0; i < termUnits; i++) {
+          const interestPayment = remainingPrincipal * rate;
+          const principalPayment = payment - interestPayment;
+          
+          remainingPrincipal -= principalPayment;
+          
+          payments.push({
+            id: i + 1,
+            dueDate: new Date(currentDate),
+            amount: parseFloat(payment.toFixed(2)),
+            principal: parseFloat(principalPayment.toFixed(2)),
+            interest: parseFloat(interestPayment.toFixed(2)),
+            remainingPrincipal: parseFloat(remainingPrincipal.toFixed(2)),
+          });
+          
+          currentDate = getNextPaymentDate(currentDate);
+        }
       }
     }
 

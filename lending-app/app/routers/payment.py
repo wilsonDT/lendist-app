@@ -29,43 +29,69 @@ async def calculate_payment_amount(db: AsyncSession, loan_id: int) -> float:
     if not loan:
         raise HTTPException(status_code=404, detail="Loan not found")
     
+    # Check if this is a one-time interest loan
+    is_one_time_interest = loan.interest_cycle and loan.interest_cycle.lower() == "one-time"
+    
+    # If it's one-time interest and there's only one term, handle specially
+    if is_one_time_interest and loan.term_units == 1:
+        # For one payment term with one-time interest, apply full interest
+        full_interest = (loan.principal * loan.interest_rate_percent) / 100
+        return round(loan.principal + full_interest, 2)
+    
     # Calculate annual interest rate based on interest cycle
     annual_rate = loan.interest_rate_percent
     interest_cycle = loan.interest_cycle.lower() if loan.interest_cycle else "yearly"
     
-    if interest_cycle == "one-time":
-        annual_rate = loan.interest_rate_percent
-    elif interest_cycle == "daily":
-        annual_rate = loan.interest_rate_percent * 365
-    elif interest_cycle == "weekly":
-        annual_rate = loan.interest_rate_percent * 52
-    elif interest_cycle == "monthly":
-        annual_rate = loan.interest_rate_percent * 12
-    
-    # Calculate periodic rate based on payment frequency
-    periodic_rate = annual_rate
-    term_frequency = loan.term_frequency.lower()
-    if term_frequency == "daily":
-        periodic_rate = annual_rate / 365
-    elif term_frequency == "weekly":
-        periodic_rate = annual_rate / 52
-    elif term_frequency == "monthly":
-        periodic_rate = annual_rate / 12
-    elif term_frequency == "quarterly":
-        periodic_rate = annual_rate / 4
+    if is_one_time_interest:
+        # For one-time interest with multiple payments, distribute evenly
+        # We'll just use the direct rate divided by term units
+        periodic_rate = loan.interest_rate_percent / loan.term_units
+    else:
+        # For recurring interest types, calculate the annualized rate
+        if interest_cycle == "daily":
+            annual_rate = loan.interest_rate_percent * 365
+        elif interest_cycle == "weekly":
+            annual_rate = loan.interest_rate_percent * 52
+        elif interest_cycle == "monthly":
+            annual_rate = loan.interest_rate_percent * 12
+        
+        # Calculate periodic rate based on payment frequency
+        periodic_rate = annual_rate
+        term_frequency = loan.term_frequency.lower()
+        if term_frequency == "daily":
+            periodic_rate = annual_rate / 365
+        elif term_frequency == "weekly":
+            periodic_rate = annual_rate / 52
+        elif term_frequency == "monthly":
+            periodic_rate = annual_rate / 12
+        elif term_frequency == "quarterly":
+            periodic_rate = annual_rate / 4
     
     # Calculate payment amount based on repayment type
     if loan.repayment_type.lower() == "flat":
         # Flat loans: interest calculated on full principal
-        interest_per_period = (loan.principal * periodic_rate) / 100
+        if is_one_time_interest:
+            # For one-time interest with multiple payments (flat), distribute evenly
+            interest_per_period = (loan.principal * loan.interest_rate_percent) / 100 / loan.term_units
+        else:
+            # Standard flat interest calculation
+            interest_per_period = (loan.principal * periodic_rate) / 100
+            
         principal_per_period = loan.principal / loan.term_units
         return round(principal_per_period + interest_per_period, 2)
     else:  # Amortized loans
-        # Convert periodic rate to decimal
-        rate = periodic_rate / 100
-        # Calculate payment using amortization formula
-        payment = loan.principal * rate / (1 - (1 + rate) ** (-loan.term_units))
-        return round(payment, 2)
+        if is_one_time_interest:
+            # For one-time interest with amortized repayment, calculate total amount and divide
+            total_interest = (loan.principal * loan.interest_rate_percent) / 100
+            total_amount = loan.principal + total_interest
+            return round(total_amount / loan.term_units, 2)
+        else:
+            # Standard amortization calculation for recurring interest
+            # Convert periodic rate to decimal
+            rate = periodic_rate / 100
+            # Calculate payment using amortization formula
+            payment = loan.principal * rate / (1 - (1 + rate) ** (-loan.term_units))
+            return round(payment, 2)
 
 class PaymentSimpleResponse(BaseModel):
     id: int

@@ -82,6 +82,7 @@ export default function RepaymentPage() {
   const [paymentAmount, setPaymentAmount] = useState<string>("")
   const [paymentDate, setPaymentDate] = useState<Date>(new Date())
   const [nextPaymentDue, setNextPaymentDue] = useState<any>(null)
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
 
   // Use the mutation hook
   const collectPaymentMutation = useCollectPayment();
@@ -148,30 +149,63 @@ export default function RepaymentPage() {
       return;
     }
     
-    const payload = {
-      loan_id: loan.id,
-      amount: parseFloat(paymentAmount),
-      date: format(paymentDate, "yyyy-MM-dd'T'HH:mm:ss")
-    };
-
-    collectPaymentMutation.mutate(payload, {
-      onSuccess: () => {
+    setIsSubmitting(true);
+    
+    try {
+      if (nextPaymentDue?.id) {
+        // If we have an existing payment to update
+        const updatePayload = {
+          amount_paid: parseFloat(paymentAmount) + (nextPaymentDue.amount_paid || 0),
+          paid_at: format(paymentDate, "yyyy-MM-dd'T'HH:mm:ss")
+        };
+        
+        // Use PUT to update an existing payment
+        await api.put(`/payments/${nextPaymentDue.id}`, updatePayload);
+        
         toast({
           title: "Success",
           description: "Payment recorded successfully!",
           variant: "default"
         });
+        
         navigate(`/loans/${loan.id}`);
-      },
-      onError: (error) => {
-        console.error("Error recording payment:", error);
-        toast({
-          title: "Error",
-          description: "Failed to record payment. Please try again.",
-          variant: "destructive"
+      } else {
+        // For new payments, use the collectPaymentMutation
+        const payload = {
+          loan_id: loan.id,
+          amount: parseFloat(paymentAmount),
+          date: format(paymentDate, "yyyy-MM-dd'T'HH:mm:ss")
+        };
+    
+        collectPaymentMutation.mutate(payload, {
+          onSuccess: () => {
+            toast({
+              title: "Success",
+              description: "Payment recorded successfully!",
+              variant: "default"
+            });
+            navigate(`/loans/${loan.id}`);
+          },
+          onError: (error) => {
+            console.error("Error recording payment:", error);
+            toast({
+              title: "Error",
+              description: "Failed to record payment. Please try again.",
+              variant: "destructive"
+            });
+            setIsSubmitting(false);
+          }
         });
       }
-    });
+    } catch (error) {
+      console.error("Error recording payment:", error);
+      toast({
+        title: "Error",
+        description: "Failed to record payment. Please try again.",
+        variant: "destructive"
+      });
+      setIsSubmitting(false);
+    }
   };
 
   if (isLoading || !loan) {
@@ -333,15 +367,15 @@ export default function RepaymentPage() {
                     type="button" 
                     variant="outline" 
                     onClick={() => navigate(`/loans/${loan.id}`)}
-                    disabled={collectPaymentMutation.isLoading}
+                    disabled={isSubmitting}
                   >
                     Cancel
                   </Button>
                   <Button 
                     type="submit" 
-                    disabled={collectPaymentMutation.isLoading || !paymentAmount || parseFloat(paymentAmount) <= 0}
+                    disabled={isSubmitting || !paymentAmount || parseFloat(paymentAmount) <= 0}
                   >
-                    {collectPaymentMutation.isLoading ? "Processing..." : "Record Payment"}
+                    {isSubmitting ? "Processing..." : "Record Payment"}
                   </Button>
                 </div>
               </form>
