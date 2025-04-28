@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, func
-from typing import Dict, Any
+from typing import Dict, Any, List
+from sqlalchemy import extract
 
 from app.core.database import get_session
 from app.models.loan import Loan
 from app.models.payment import Payment
 from app.models.borrower import Borrower
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
+import calendar
 
 router = APIRouter()
 
@@ -90,4 +92,69 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_session)):
         "overdue_amount": float(overdue_amount),
         "loans_change": int(loans_change),
         "borrowers_change": int(borrowers_change)
-    } 
+    }
+
+@router.get("/expected-profit", response_model=List[Dict[str, Any]])
+async def get_expected_monthly_profit(
+    months: int = 12,
+    db: AsyncSession = Depends(get_session)
+):
+    """
+    Calculate expected profit per month for the next X months (default 12).
+    This endpoint returns data for dashboard graphs showing projected earnings.
+    """
+    today = date.today()
+    result = []
+    
+    # Calculate the expected profit for each month
+    for i in range(months):
+        # Calculate the month we're looking at
+        target_month = today.month + i
+        target_year = today.year + (target_month - 1) // 12
+        target_month = ((target_month - 1) % 12) + 1
+        
+        # Get the first and last day of the target month
+        first_day = date(target_year, target_month, 1)
+        last_day = date(target_year, target_month, 
+                        calendar.monthrange(target_year, target_month)[1])
+        
+        # Query for expected payments in this month from active loans
+        # For profit calculation, we only consider the interest portion of payments
+        query = select(
+            func.sum(Payment.amount_due - Payment.amount_paid)
+        ).join(
+            Loan, Payment.loan_id == Loan.id
+        ).where(
+            Payment.due_date >= first_day,
+            Payment.due_date <= last_day,
+            Loan.status == "active"
+        )
+        
+        total_due_result = await db.execute(query)
+        total_due = total_due_result.scalar() or 0
+        
+        # Get principal portion from the same time period to calculate interest
+        principal_query = select(
+            func.sum(Loan.principal / Loan.term_units)
+        ).join(
+            Payment, Payment.loan_id == Loan.id
+        ).where(
+            Payment.due_date >= first_day,
+            Payment.due_date <= last_day,
+            Loan.status == "active"
+        )
+        
+        principal_result = await db.execute(principal_query)
+        principal_portion = principal_result.scalar() or 0
+        
+        # Calculate expected profit (total due minus principal portion)
+        expected_profit = max(0, total_due - principal_portion)
+        
+        # Add to results
+        result.append({
+            "month": f"{calendar.month_name[target_month]} {target_year}",
+            "month_key": f"{target_year}-{target_month:02d}",
+            "expected_profit": round(expected_profit, 2)
+        })
+    
+    return result 

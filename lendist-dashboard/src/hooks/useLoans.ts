@@ -13,6 +13,7 @@ export interface Loan {
   start_date: string;
   created_at: string;
   borrower_name?: string;
+  status: string; // active, completed, defaulted, cancelled
 }
 
 export function useLoans() {
@@ -77,6 +78,28 @@ export function useCreateLoan() {
     {
       onSuccess: () => {
         queryClient.invalidateQueries(['loans']);
+        queryClient.invalidateQueries(['dashboardSummary']);
+      }
+    }
+  );
+}
+
+// Add mutation to update loan status
+export function useUpdateLoanStatus() {
+  const queryClient = useQueryClient();
+  
+  interface UpdateLoanStatusPayload {
+    loanId: number;
+    status: string; // 'active', 'completed', 'defaulted', 'cancelled'
+  }
+  
+  return useMutation<Loan, Error, UpdateLoanStatusPayload>(
+    ({ loanId, status }) => api.patch(`/loans/${loanId}/status`, { status }).then(res => res.data),
+    {
+      onSuccess: (data) => {
+        // Invalidate and refetch loans queries to update UI
+        queryClient.invalidateQueries(['loans']);
+        queryClient.invalidateQueries(['loan', data.id]);
         queryClient.invalidateQueries(['dashboardSummary']);
       }
     }

@@ -13,8 +13,8 @@ import { usePaymentsByLoan } from "../hooks/usePayments"
 import { api } from "../api/useApi"
 import { formatCurrency } from "../lib/utils"
 import { DatePicker } from "../components/ui/date-picker"
-import { format } from "date-fns"
-import { useCollectPayment } from "../hooks/usePayments"
+import { format, addDays, addWeeks, addMonths, addYears, parseISO } from "date-fns"
+import { useCollectPayment, useUpdatePayment } from "../hooks/usePayments"
 import { useToast } from "../components/ui/use-toast"
 
 // Payment interface
@@ -29,6 +29,30 @@ interface Payment {
 
 // Cache for borrower names
 const borrowerCache = new Map<number, string>();
+
+// Helper function to calculate next payment date based on term frequency
+const calculateNextPaymentDate = (lastDueDate: Date, termFrequency: string): Date => {
+  switch (termFrequency.toLowerCase()) {
+    case 'daily':
+      return addDays(lastDueDate, 1);
+    case 'weekly':
+      return addWeeks(lastDueDate, 1);
+    case 'monthly':
+      return addMonths(lastDueDate, 1);
+    case 'quarterly':
+      return addMonths(lastDueDate, 3);
+    case 'yearly':
+      return addYears(lastDueDate, 1);
+    default:
+      return addMonths(lastDueDate, 1); // Default to monthly
+  }
+};
+
+// Helper function to calculate the first payment date based on loan start date
+const calculateFirstPaymentDate = (startDate: Date, termFrequency: string): Date => {
+  // The first payment date should be one term period after the start date
+  return calculateNextPaymentDate(startDate, termFrequency);
+};
 
 // Add helper from LoanDetailPage to compute payments accurately
 const calculatePaymentWithInterest = (
@@ -83,9 +107,11 @@ export default function RepaymentPage() {
   const [paymentDate, setPaymentDate] = useState<Date>(new Date())
   const [nextPaymentDue, setNextPaymentDue] = useState<any>(null)
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
+  const [nextPaymentDueDate, setNextPaymentDueDate] = useState<Date>(new Date())
 
-  // Use the mutation hook
+  // Use the mutation hooks
   const collectPaymentMutation = useCollectPayment();
+  const updatePaymentMutation = useUpdatePayment();
 
   useEffect(() => {
     let isMounted = true;
@@ -120,8 +146,34 @@ export default function RepaymentPage() {
         if (target) {
           setNextPaymentDue(target);
           setPaymentAmount((target.amount_due - (target.amount_paid || 0)).toString());
+          
+          // Set the payment date to the due date by default
+          const dueDate = parseISO(target.due_date);
+          setPaymentDate(dueDate);
+          setNextPaymentDueDate(dueDate);
         } else {
           setNextPaymentDue(null);
+          
+          // Calculate the next payment date based on the last payment and term frequency
+          let nextDate = new Date();
+          if (payments.length > 0) {
+            // Sort payments by due date (descending) to get the latest payment
+            const sortedPayments = [...payments].sort((a, b) => 
+              new Date(b.due_date).getTime() - new Date(a.due_date).getTime()
+            );
+            
+            const lastPayment = sortedPayments[0];
+            const lastDueDate = parseISO(lastPayment.due_date);
+            nextDate = calculateNextPaymentDate(lastDueDate, loan.term_frequency);
+          } else {
+            // If no payments, calculate first payment date from loan start date
+            const startDate = parseISO(loan.start_date);
+            // Use the helper to calculate the first payment date (one term after start date)
+            nextDate = calculateFirstPaymentDate(startDate, loan.term_frequency);
+          }
+          
+          setPaymentDate(nextDate);
+          setNextPaymentDueDate(nextDate);
           
           // Use calculated payment from our first payment in the schedule for new payments
           const regularPayment = payments[0]?.amount_due || (loan.principal / loan.term_units);
@@ -153,22 +205,33 @@ export default function RepaymentPage() {
     
     try {
       if (nextPaymentDue?.id) {
-        // If we have an existing payment to update
+        // For existing payments, use the updatePaymentMutation
         const updatePayload = {
+          paymentId: nextPaymentDue.id,
+          loanId: loan.id,
           amount_paid: parseFloat(paymentAmount) + (nextPaymentDue.amount_paid || 0),
           paid_at: format(paymentDate, "yyyy-MM-dd'T'HH:mm:ss")
         };
         
-        // Use PUT to update an existing payment
-        await api.put(`/payments/${nextPaymentDue.id}`, updatePayload);
-        
-        toast({
-          title: "Success",
-          description: "Payment recorded successfully!",
-          variant: "default"
+        updatePaymentMutation.mutate(updatePayload, {
+          onSuccess: () => {
+            toast({
+              title: "Success",
+              description: "Payment updated successfully!",
+              variant: "default"
+            });
+            navigate(`/loans/${loan.id}`);
+          },
+          onError: (error) => {
+            console.error("Error updating payment:", error);
+            toast({
+              title: "Error",
+              description: "Failed to update payment. Please try again.",
+              variant: "destructive"
+            });
+            setIsSubmitting(false);
+          }
         });
-        
-        navigate(`/loans/${loan.id}`);
       } else {
         // For new payments, use the collectPaymentMutation
         const payload = {
@@ -198,10 +261,10 @@ export default function RepaymentPage() {
         });
       }
     } catch (error) {
-      console.error("Error recording payment:", error);
+      console.error("Error processing payment:", error);
       toast({
         title: "Error",
-        description: "Failed to record payment. Please try again.",
+        description: "Failed to process payment. Please try again.",
         variant: "destructive"
       });
       setIsSubmitting(false);
@@ -274,14 +337,14 @@ export default function RepaymentPage() {
               </CardContent>
             </Card>
 
-            {/* Show Interest Cycle */}
+            {/* Payment Terms */}
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center">
                   <Clock className="h-5 w-5 text-primary mr-3" />
                   <div>
-                    <p className="text-sm text-muted-foreground">Interest Cycle</p>
-                    <p className="font-medium">{loan?.interest_cycle || "Yearly"}</p>
+                    <p className="text-sm text-muted-foreground">Payment Terms</p>
+                    <p className="font-medium">{loan.term_units} {loan.term_frequency.toLowerCase()}</p>
                   </div>
                 </div>
               </CardContent>
@@ -327,9 +390,19 @@ export default function RepaymentPage() {
                       <CheckCircle2 className="h-5 w-5 mr-2" />
                       All scheduled payments complete
                     </h3>
-                    <p className="text-sm text-muted-foreground">
-                      You can record an additional payment if needed.
+                    <p className="text-sm text-muted-foreground mb-3">
+                      You can record an additional payment based on the loan terms.
                     </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Next Payment Date</p>
+                        <p className="font-medium">{format(nextPaymentDueDate, "PPP")}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Based on</p>
+                        <p className="font-medium">{loan.term_frequency.toLowerCase()} payments</p>
+                      </div>
+                    </div>
                   </div>
                 )}
 

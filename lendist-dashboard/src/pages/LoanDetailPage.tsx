@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { Sidebar } from "../components/sidebar"
 import { Header } from "../components/header"
@@ -8,7 +8,7 @@ import { Badge } from "../components/ui/badge"
 import { Progress } from "../components/ui/progress"
 import { ArrowLeft, Calendar, CreditCard, DollarSign, User, Clock, FileText, CheckCircle2, PlusCircle, AlertCircle, RotateCw } from "lucide-react"
 import { LoanDetailPageSkeleton } from "../components/skeleton-layout"
-import { useLoan } from "../hooks/useLoans"
+import { useLoan, useUpdateLoanStatus } from "../hooks/useLoans"
 import { usePaymentsByLoan, useRecalculatePayments } from "../hooks/usePayments"
 import { api } from "../api/useApi"
 import { formatCurrency } from "../lib/utils"
@@ -161,15 +161,14 @@ export default function LoanDetailPage() {
   
   // Add the recalculate mutation
   const recalculatePaymentsMutation = useRecalculatePayments()
+  // Add status update mutation
+  const updateLoanStatusMutation = useUpdateLoanStatus()
 
-  // State for loan status
-  const [loanStatus, setLoanStatus] = useState<string>("active")
+  // Track if status has been updated to avoid unnecessary API calls
+  const [statusUpdated, setStatusUpdated] = useState(false)
   
-  // Cast loan to ExtendedLoan with dynamic status based on payments
-  const loan: ExtendedLoan | undefined = loanData ? {
-    ...loanData,
-    status: loanStatus // Use the status from state
-  } : undefined;
+  // Cast loan to use the actual status from the API
+  const loan = loanData;
   
   // Log the error if there is one
   useEffect(() => {
@@ -178,16 +177,27 @@ export default function LoanDetailPage() {
     }
   }, [loanError])
 
-  // Add effect to refresh data when returning from payment page
+  // Add effect to refresh data when returning from payment page or on regular intervals
   useEffect(() => {
-    // Refetch data when user returns to this page
-    const refreshData = async () => {
+    // Refetch all data immediately when the component mounts
+    const refreshAllData = async () => {
+      console.log("Refreshing loan and payment data...");
+      setStatusUpdated(false); // Reset the status update flag
       await refetchLoan();
       await refetchPayments();
     };
     
-    refreshData();
-  }, [location.key, refetchLoan, refetchPayments]);
+    refreshAllData();
+    
+    // Also set up a refresh interval (e.g., every 30 seconds) to catch updates made elsewhere
+    const refreshInterval = setInterval(() => {
+      refreshAllData();
+    }, 30000); // 30 seconds
+    
+    return () => {
+      clearInterval(refreshInterval);
+    };
+  }, [refetchLoan, refetchPayments]);
   
   const [paymentSchedule, setPaymentSchedule] = useState<Payment[]>([])
   const [paymentProgress, setPaymentProgress] = useState(0)
@@ -234,9 +244,9 @@ export default function LoanDetailPage() {
     return () => { isMounted = false; };
   }, [loan]); // Only depends on loan
 
-  // Process fetched payment data (keep this)
+  // Process fetched payment data and update loan status if needed
   useEffect(() => {
-    if (payments && loan) {
+    if (payments && loan && !isLoading && !statusUpdated) {
       // Use the fetched payments directly
       setPaymentSchedule(payments);
 
@@ -250,7 +260,7 @@ export default function LoanDetailPage() {
       payments.forEach(p => { totalPaidAmount += p.amount_paid || 0; });
       setTotalPaid(totalPaidAmount);
 
-      // Calculate progress based on total amount due, not just principal
+      // Calculate progress based on total amount due
       const progress = totalAmount > 0 
         ? Math.min(100, Math.round((totalPaidAmount / totalAmount) * 100))
         : 0;
@@ -258,17 +268,60 @@ export default function LoanDetailPage() {
 
       // Check if all payments are complete
       const allPaymentsComplete = payments.every(p => p.paid_at !== null && p.amount_paid >= p.amount_due);
-      const anyPaymentsMade = payments.some(p => p.paid_at !== null && p.amount_paid > 0);
       
-      if (allPaymentsComplete) {
-        setLoanStatus("completed");
-      } else if (anyPaymentsMade) {
-        setLoanStatus("active");
-      } else {
-        setLoanStatus("active");
+      // Only update status in the database if it needs to change
+      if (allPaymentsComplete && loan.status !== "completed") {
+        console.log("All payments complete. Updating loan status to completed.");
+        updateLoanStatusMutation.mutate(
+          { loanId: loan.id, status: "completed" }, 
+          {
+            onSuccess: () => {
+              toast({
+                title: "Status Updated",
+                description: "Loan status updated to completed.",
+                variant: "default"
+              });
+              setStatusUpdated(true);
+              refetchLoan(); // Refresh loan data with updated status
+            },
+            onError: (error) => {
+              console.error("Error updating loan status:", error);
+              toast({
+                title: "Error",
+                description: "Failed to update loan status.",
+                variant: "destructive"
+              });
+            }
+          }
+        );
+      } else if (!allPaymentsComplete && loan.status === "completed") {
+        // If not all payments are complete but loan is marked as completed, update back to active
+        console.log("Not all payments complete. Updating loan status to active.");
+        updateLoanStatusMutation.mutate(
+          { loanId: loan.id, status: "active" }, 
+          {
+            onSuccess: () => {
+              toast({
+                title: "Status Updated",
+                description: "Loan status updated to active.",
+                variant: "default"
+              });
+              setStatusUpdated(true);
+              refetchLoan(); // Refresh loan data with updated status
+            },
+            onError: (error) => {
+              console.error("Error updating loan status:", error);
+              toast({
+                title: "Error",
+                description: "Failed to update loan status.",
+                variant: "destructive"
+              });
+            }
+          }
+        );
       }
     }
-  }, [payments, loan]); // Re-run when payments or loan data changes
+  }, [payments, loan, isLoading, updateLoanStatusMutation, toast, refetchLoan, statusUpdated]);
 
   // Handle payment recalculation
   const handleRecalculatePayments = () => {
@@ -282,12 +335,37 @@ export default function LoanDetailPage() {
           variant: "default"
         });
         refetchPayments(); // Refresh the payments data
+        setStatusUpdated(false); // Check status again after recalculation
       },
       onError: (error) => {
         console.error("Error recalculating payments:", error);
         toast({
           title: "Error",
           description: "Failed to recalculate payment schedule. Please try again.",
+          variant: "destructive"
+        });
+      }
+    });
+  };
+
+  // Manually update loan status if needed
+  const handleUpdateStatus = (newStatus: string) => {
+    if (!loan || loan.status === newStatus) return;
+    
+    updateLoanStatusMutation.mutate({ loanId: loan.id, status: newStatus }, {
+      onSuccess: () => {
+        toast({
+          title: "Status Updated",
+          description: `Loan status updated to ${newStatus}.`,
+          variant: "default"
+        });
+        refetchLoan(); // Refresh loan data
+      },
+      onError: (error) => {
+        console.error("Error updating loan status:", error);
+        toast({
+          title: "Error",
+          description: "Failed to update loan status.",
           variant: "destructive"
         });
       }
@@ -319,6 +397,17 @@ export default function LoanDetailPage() {
   const firstUnpaidOrPartial = paymentSchedule.find(p => !p.paid_at || (p.amount_paid < p.amount_due));
   const nextPaymentDisplayAmount = firstUnpaidOrPartial ? firstUnpaidOrPartial.amount_due : 0;
   const nextPaymentDisplayDate = firstUnpaidOrPartial ? firstUnpaidOrPartial.due_date : "N/A";
+
+  // Define status badge color based on loan status
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "active": return "bg-emerald-500";
+      case "completed": return "bg-blue-500";
+      case "defaulted": return "bg-red-500";
+      case "cancelled": return "bg-yellow-500";
+      default: return "bg-gray-500";
+    }
+  };
 
   return (
     <div className="min-h-screen flex">
@@ -414,7 +503,7 @@ export default function LoanDetailPage() {
                     <Clock className="h-5 w-5 text-primary mt-0.5 mr-3" />
                     <div>
                       <p className="text-sm text-muted-foreground">Term</p>
-                      <p className="font-medium">{loan.term_units} {loan.term_frequency}</p>
+                      <p className="font-medium">{loan.term_units} {loan.term_frequency.toLowerCase()}</p>
                     </div>
                   </div>
                   
@@ -431,12 +520,8 @@ export default function LoanDetailPage() {
                     <div>
                       <p className="text-sm text-muted-foreground">Status</p>
                       <div className="mt-1 flex items-center">
-                        <div className={`rounded-full h-2 w-2 mr-2 ${
-                          loan.status === "completed" ? "bg-blue-500" : 
-                          loan.status === "active" ? "bg-emerald-500" : 
-                          "bg-gray-500"
-                        }`}></div>
-                        <span>{capitalizeFirstLetter(loan.status || "active")}</span>
+                        <div className={`rounded-full h-2 w-2 mr-2 ${getStatusColor(loan.status)}`}></div>
+                        <span>{capitalizeFirstLetter(loan.status)}</span>
                       </div>
                     </div>
                   </div>
@@ -454,6 +539,7 @@ export default function LoanDetailPage() {
                   <Button 
                     className="w-full"
                     onClick={() => navigate(`/loans/${loan.id}/repay`)}
+                    disabled={loan.status === "completed"}
                   >
                     Record Payment
                   </Button>
@@ -468,7 +554,27 @@ export default function LoanDetailPage() {
                     {recalculatePaymentsMutation.isLoading ? "Recalculating..." : "Recalculate Payments"}
                   </Button>
                   
-                  <Button variant="outline" className="w-full">Edit Loan</Button>
+                  {/* Status Update Dropdown */}
+                  <div className="flex space-x-2">
+                    {loan.status !== "active" && (
+                      <Button 
+                        variant="outline" 
+                        className="flex-1"
+                        onClick={() => handleUpdateStatus("active")}
+                      >
+                        Set Active
+                      </Button>
+                    )}
+                    {loan.status !== "completed" && (
+                      <Button 
+                        variant="outline" 
+                        className="flex-1"
+                        onClick={() => handleUpdateStatus("completed")}
+                      >
+                        Mark Complete
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
