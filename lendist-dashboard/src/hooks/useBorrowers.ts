@@ -1,4 +1,4 @@
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/useApi';
 
 export interface Borrower {
@@ -10,18 +10,16 @@ export interface Borrower {
   total_loans?: number;
   repayment_rate?: number;
   created_at: string;
-  email?: string;
-  address?: string;
 }
 
 export function useBorrowers() {
-  return useQuery<Borrower[]>(['borrowers'], () => api.get('/borrowers').then(res => res.data));
+  return useQuery<Borrower[]>(['borrowers'], () => api.get('/borrowers/').then(res => res.data));
 }
 
 export function useBorrower(id: number) {
   return useQuery<Borrower>(
     ['borrower', id], 
-    () => api.get(`/borrowers/${id}`).then(res => res.data),
+    () => api.get(`/borrowers/${id}/`).then(res => res.data),
     {
       enabled: !!id
     }
@@ -29,7 +27,18 @@ export function useBorrower(id: number) {
 }
 
 export function useCreateBorrower() {
-  return useMutation<Borrower, Error, { name: string; mobile?: string; email?: string; address?: string }>(
-    (payload) => api.post('/borrowers', payload).then(res => res.data)
+  const queryClient = useQueryClient();
+  
+  // Only accept name and mobile in the payload since we've removed email and address
+  return useMutation<Borrower, Error, { name: string; mobile: string }>(
+    (payload) => api.post('/borrowers/', payload).then(res => res.data),
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(['borrowers']);
+      },
+      onError: (error) => {
+        console.error('Failed to create borrower:', error);
+      }
+    }
   );
 } 

@@ -5,6 +5,11 @@ import { Card, CardContent } from "./ui/card"
 import { Input } from "./ui/input"
 import { useNavigate } from "react-router-dom"
 import { useCreateLoan } from "../hooks/useLoans"
+import { useBorrowers, Borrower } from "../hooks/useBorrowers"
+import { DatePicker } from "./ui/date-picker"
+import { parse, format } from "date-fns"
+import { RepaymentSchedulePreview } from "./RepaymentSchedulePreview"
+import axios from "axios"
 
 // We're using these components type-unsafely due to TS issues, but they exist
 // @ts-ignore
@@ -20,6 +25,10 @@ interface CreateLoanDialogProps {
 export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
   const navigate = useNavigate()
   const createLoan = useCreateLoan()
+  const { data: borrowers, isLoading: borrowersLoading, error } = useBorrowers()
+  // Cast error to any to avoid type issues
+  const borrowersError = error as any;
+
   const [formData, setFormData] = useState({
     borrowerId: "",
     amount: "",
@@ -28,27 +37,32 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
     frequency: "monthly",
     repaymentType: "flat",
     startDate: "",
-    purpose: "",
+    interestCycle: "monthly",
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Map of borrower IDs to names for display in SelectValue
-  const borrowerNames: Record<string, string> = {
-    "1": "Juan Dela Cruz",
-    "2": "John Smith"
-  }
-
   // Map for frequency display names
   const frequencyNames: Record<string, string> = {
+    "daily": "Daily",
     "weekly": "Weekly",
     "monthly": "Monthly",
-    "quarterly": "Quarterly"
+    "quarterly": "Quarterly",
+    "yearly": "Yearly"
   }
 
   // Map for repayment type display names
   const repaymentTypeNames: Record<string, string> = {
     "flat": "Flat",
     "amortized": "Amortized"
+  }
+
+  // Map for interest cycle display names
+  const interestCycleNames: Record<string, string> = {
+    "one-time": "One-time",
+    "daily": "Per Day",
+    "weekly": "Per Week",
+    "monthly": "Per Month",
+    "yearly": "Per Year"
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,6 +72,13 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
 
   const handleSelectChange = (name: string, value: string) => {
     setFormData((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleDateChange = (date: Date | undefined) => {
+    setFormData((prev) => ({ 
+      ...prev, 
+      startDate: date ? format(date, "yyyy-MM-dd") : "" 
+    }));
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -80,25 +101,86 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
         term_units: parseInt(formData.term, 10),
         term_frequency: formData.frequency,
         repayment_type: formData.repaymentType,
+        interest_cycle: formData.interestCycle,
         start_date: formData.startDate,
+        status: "active",
       }
       
-      // Call the mutation to create the loan
-      const response = await createLoan.mutateAsync(loanPayload)
+      console.log('Submitting loan payload:', loanPayload);
+      
+      let createdLoanId = null;
+      
+      // Try direct API call as a workaround
+      try {
+        // Get the base URL from the api module
+        const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
+        const response = await axios.post(`${apiBaseUrl}/loans/`, loanPayload, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+        });
+        
+        console.log('Direct API response:', response.data);
+        
+        if (response.data && response.data.id) {
+          createdLoanId = response.data.id;
+          console.log('Created loan ID from direct API:', createdLoanId);
+        }
+      } catch (directApiError) {
+        console.error("Direct API error:", directApiError);
+        // Fall back to useCreateLoan if direct API fails
+      }
+      
+      // If direct API call didn't work, use the mutation
+      if (!createdLoanId) {
+        try {
+          const response = await createLoan.mutateAsync(loanPayload);
+          console.log('useCreateLoan response:', response);
+          
+          if (response && response.id) {
+            createdLoanId = response.id;
+            console.log('Created loan ID from useCreateLoan:', createdLoanId);
+          }
+        } catch (mutationError) {
+          console.error("Mutation error:", mutationError);
+          throw mutationError; // Re-throw to be caught by the outer catch
+        }
+      }
+      
+      // Ensure we have a valid loan ID before redirecting
+      if (!createdLoanId) {
+        throw new Error("Failed to get created loan ID");
+      }
       
       alert("Loan created successfully!")
-      
       onClose()
       
-      // Navigate to the new loan detail page with the actual ID from the response
-      navigate(`/loans/${response.id}`)
+      // Navigate to the new loan detail page with the actual ID
+      console.log(`Navigating to /loans/${createdLoanId}`);
+      navigate(`/loans/${createdLoanId}`);
+      
     } catch (error) {
       console.error("Error creating loan:", error)
-      alert("Failed to create loan. Please try again.")
+      
+      // Show a more descriptive error message
+      const err = error as any; // Type assertion
+      if (err.response && err.response.data) {
+        alert(`Failed to create loan: ${err.response.data.detail || JSON.stringify(err.response.data)}`)
+      } else {
+        alert("Failed to create loan. Please check browser console for details and contact your backend team.\n\nError: The 'status' field needs to be added to the loan creation schema on the backend.")
+      }
     } finally {
       setIsSubmitting(false)
     }
   }
+
+  // Get borrower name from the fetched list
+  const getSelectedBorrowerName = () => {
+    if (!borrowers || !formData.borrowerId) return "Select borrower";
+    const selectedBorrower = borrowers.find((b: Borrower) => b.id.toString() === formData.borrowerId);
+    return selectedBorrower ? selectedBorrower.name : "Select borrower";
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -118,16 +200,29 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
                     value={formData.borrowerId}
                     onValueChange={(value: string) => handleSelectChange("borrowerId", value)}
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select borrower">
-                        {formData.borrowerId ? borrowerNames[formData.borrowerId] : "Select borrower"}
+                    <SelectTrigger disabled={borrowersLoading || !!borrowersError}>
+                      <SelectValue placeholder={borrowersLoading ? "Loading..." : (borrowersError ? "Error loading" : "Select borrower")}>
+                        {borrowersLoading ? "Loading..." : (borrowersError ? "Error loading borrowers" : getSelectedBorrowerName())}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="1">Juan Dela Cruz</SelectItem>
-                      <SelectItem value="2">John Smith</SelectItem>
+                      {borrowers && borrowers.map((borrower: Borrower) => (
+                        <SelectItem key={borrower.id} value={borrower.id.toString()}>
+                          {borrower.name}
+                        </SelectItem>
+                      ))}
+                      {borrowersLoading && <div className="p-2 text-sm text-muted-foreground">Loading...</div>}
+                      {(!borrowers || borrowers.length === 0) && !borrowersLoading && !borrowersError && 
+                        <div className="p-2 text-sm text-muted-foreground">No borrowers found</div>
+                      }
                     </SelectContent>
                   </Select>
+                  {/* Error message displayed below the Select component */}
+                  {borrowersError && (
+                    <p className="text-sm text-red-500 mt-1">
+                      Could not load borrowers{borrowersError instanceof Error ? `: ${borrowersError.message}` : ''}.
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -150,6 +245,28 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
                     value={formData.interestRate}
                     onChange={handleChange}
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="interestCycle">Interest Cycle</Label>
+                  <Select
+                    name="interestCycle"
+                    value={formData.interestCycle}
+                    onValueChange={(value: string) => handleSelectChange("interestCycle", value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select interest cycle">
+                        {formData.interestCycle ? interestCycleNames[formData.interestCycle] : "Select interest cycle"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="one-time">One-time</SelectItem>
+                      <SelectItem value="daily">Per Day</SelectItem>
+                      <SelectItem value="weekly">Per Week</SelectItem>
+                      <SelectItem value="monthly">Per Month</SelectItem>
+                      <SelectItem value="yearly">Per Year</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">
@@ -176,9 +293,11 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="daily">Daily</SelectItem>
                       <SelectItem value="weekly">Weekly</SelectItem>
                       <SelectItem value="monthly">Monthly</SelectItem>
                       <SelectItem value="quarterly">Quarterly</SelectItem>
+                      <SelectItem value="yearly">Yearly</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -204,28 +323,29 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
 
                 <div className="space-y-2">
                   <Label htmlFor="startDate">Start Date</Label>
-                  <Input
-                    id="startDate"
+                  <DatePicker
                     name="startDate"
-                    type="date"
-                    value={formData.startDate}
-                    onChange={handleChange}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="purpose">Purpose</Label>
-                  <Input
-                    id="purpose"
-                    name="purpose"
-                    placeholder="Business, Personal, etc."
-                    value={formData.purpose}
-                    onChange={handleChange}
+                    placeholder="Select start date"
+                    value={formData.startDate ? parse(formData.startDate, "yyyy-MM-dd", new Date()) : undefined}
+                    onChange={handleDateChange}
                   />
                 </div>
               </div>
             </CardContent>
           </Card>
+
+          {/* Repayment Schedule Preview */}
+          <div className="mt-6">
+            <RepaymentSchedulePreview
+              principal={parseFloat(formData.amount) || 0}
+              interestRate={parseFloat(formData.interestRate) || 0}
+              termUnits={parseInt(formData.term) || 0}
+              frequency={formData.frequency}
+              repaymentType={formData.repaymentType}
+              interestCycle={formData.interestCycle}
+              startDate={formData.startDate ? parse(formData.startDate, "yyyy-MM-dd", new Date()) : undefined}
+            />
+          </div>
 
           <DialogFooter className="mt-6">
             <Button variant="outline" type="button" onClick={onClose} disabled={isSubmitting}>

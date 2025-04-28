@@ -4,7 +4,12 @@ from app.schemas.borrower import BorrowerCreate, BorrowerUpdate
 from typing import List, Optional
 
 async def create_borrower(db: Session, borrower: BorrowerCreate) -> Borrower:
-    db_borrower = Borrower(**borrower.model_dump())
+    # Explicitly create a Borrower with only the fields that exist in the database
+    # Do not include email and address as they might not exist in the actual database table
+    db_borrower = Borrower(
+        name=borrower.name,
+        mobile=borrower.mobile
+    )
     db.add(db_borrower)
     await db.commit()
     await db.refresh(db_borrower)

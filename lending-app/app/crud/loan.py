@@ -52,19 +52,105 @@ async def delete_loan(db: Session, loan_id: int) -> bool:
     return True
 
 async def generate_schedule(db: Session, loan: Loan) -> None:
-    freq = 7 if loan.term_frequency == "WEEKLY" else 30
-    if loan.repayment_type == "FLAT":
-        # interest each period, principal at end
-        interest_only = loan.principal * loan.interest_rate_percent / 100 / loan.term_units
-        for i in range(loan.term_units):
-            due = loan.start_date + timedelta(days=freq * i)
-            amount = interest_only if i < loan.term_units - 1 else interest_only + loan.principal
-            db.add(Payment(loan_id=loan.id, due_date=due, amount_due=amount))
-    else:  # AMORTISED
-        r = loan.interest_rate_percent / 100 / loan.term_units
-        pmt = loan.principal * r / (1 - (1 + r) ** (-loan.term_units))
-        for i in range(loan.term_units):
-            due = loan.start_date + timedelta(days=freq * i)
-            db.add(Payment(loan_id=loan.id, due_date=due, amount_due=round(pmt, 2)))
+    # Set default interest cycle if not specified
+    interest_cycle = getattr(loan, 'interest_cycle', 'yearly')
     
-    await db.commit() 
+    # Calculate the proper due dates based on frequency
+    next_due_date = loan.start_date
+    
+    # Calculate annual interest rate based on interest cycle
+    annual_rate = loan.interest_rate_percent
+    if interest_cycle.lower() == 'one-time':
+        annual_rate = loan.interest_rate_percent
+    elif interest_cycle.lower() == 'daily':
+        annual_rate = loan.interest_rate_percent * 365
+    elif interest_cycle.lower() == 'weekly':
+        annual_rate = loan.interest_rate_percent * 52
+    elif interest_cycle.lower() == 'monthly':
+        annual_rate = loan.interest_rate_percent * 12
+    
+    # Calculate periodic rate based on payment frequency
+    periodic_rate = annual_rate
+    if loan.term_frequency.lower() == 'daily':
+        periodic_rate = annual_rate / 365
+    elif loan.term_frequency.lower() == 'weekly':
+        periodic_rate = annual_rate / 52
+    elif loan.term_frequency.lower() == 'monthly':
+        periodic_rate = annual_rate / 12
+    elif loan.term_frequency.lower() == 'quarterly':
+        periodic_rate = annual_rate / 4
+    
+    # Create the schedule based on repayment type
+    if loan.repayment_type.lower() == 'flat':
+        # Flat loans: interest calculated on full principal
+        interest_per_period = (loan.principal * periodic_rate) / 100
+        principal_per_period = loan.principal / loan.term_units
+        payment_amount = principal_per_period + interest_per_period
+        
+        for i in range(loan.term_units):
+            # Calculate next due date
+            if i > 0:
+                if loan.term_frequency.lower() == 'daily':
+                    next_due_date = next_due_date + timedelta(days=1)
+                elif loan.term_frequency.lower() == 'weekly':
+                    next_due_date = next_due_date + timedelta(days=7)
+                elif loan.term_frequency.lower() == 'monthly':
+                    # Add one month (approximately 30 days)
+                    next_due_date = add_months(next_due_date, 1)
+                elif loan.term_frequency.lower() == 'quarterly':
+                    # Add three months (approximately 90 days)
+                    next_due_date = add_months(next_due_date, 3)
+                elif loan.term_frequency.lower() == 'yearly':
+                    # Add one year (approximately 365 days)
+                    next_due_date = add_months(next_due_date, 12)
+            
+            db.add(Payment(
+                loan_id=loan.id, 
+                due_date=next_due_date, 
+                amount_due=round(payment_amount, 2)
+            ))
+    else:  # Amortized loans
+        # Convert periodic rate to decimal
+        rate = periodic_rate / 100
+        # Calculate payment using amortization formula
+        payment = loan.principal * rate / (1 - (1 + rate) ** (-loan.term_units))
+        
+        remaining_principal = loan.principal
+        
+        for i in range(loan.term_units):
+            # Calculate next due date
+            if i > 0:
+                if loan.term_frequency.lower() == 'daily':
+                    next_due_date = next_due_date + timedelta(days=1)
+                elif loan.term_frequency.lower() == 'weekly':
+                    next_due_date = next_due_date + timedelta(days=7)
+                elif loan.term_frequency.lower() == 'monthly':
+                    next_due_date = add_months(next_due_date, 1)
+                elif loan.term_frequency.lower() == 'quarterly':
+                    next_due_date = add_months(next_due_date, 3)
+                elif loan.term_frequency.lower() == 'yearly':
+                    next_due_date = add_months(next_due_date, 12)
+            
+            # Calculate interest component of this payment
+            interest_payment = remaining_principal * rate
+            # Calculate principal component of this payment
+            principal_payment = payment - interest_payment
+            # Update remaining principal
+            remaining_principal -= principal_payment
+            
+            db.add(Payment(
+                loan_id=loan.id, 
+                due_date=next_due_date, 
+                amount_due=round(payment, 2)
+            ))
+    
+    await db.commit()
+
+# Helper function to add months to a date
+def add_months(date_obj, months):
+    """Add a specified number of months to a date object."""
+    month = date_obj.month - 1 + months
+    year = date_obj.year + month // 12
+    month = month % 12 + 1
+    day = min(date_obj.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month-1])
+    return date(year, month, day) 

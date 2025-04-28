@@ -8,6 +8,7 @@ from app.core.database import get_session
 from app.schemas.loan import LoanCreate, LoanUpdate, LoanResponse
 from app.crud import loan as loan_crud
 from app.schemas import ResponseModel
+from app.models.payment import Payment
 
 router = APIRouter()
 
@@ -19,6 +20,8 @@ class LoanCreatedResponse(BaseModel):
     term_units: int
     term_frequency: str
     repayment_type: str
+    interest_cycle: str
+    status: str
     message: str = "Loan created successfully"
 
 @router.post("/", response_model=LoanCreatedResponse, status_code=status.HTTP_201_CREATED)
@@ -34,7 +37,9 @@ async def create_loan(
         interest_rate_percent=db_loan.interest_rate_percent,
         term_units=db_loan.term_units,
         term_frequency=db_loan.term_frequency,
-        repayment_type=db_loan.repayment_type
+        repayment_type=db_loan.repayment_type,
+        interest_cycle=db_loan.interest_cycle,
+        status=db_loan.status
     )
 
 @router.get("/{loan_id}", response_model=Dict[str, Any])
@@ -56,6 +61,7 @@ async def read_loan(
         "term_frequency": db_loan.term_frequency,
         "repayment_type": db_loan.repayment_type,
         "start_date": db_loan.start_date,
+        "status": db_loan.status,
         "created_at": db_loan.created_at
     }
 
@@ -77,6 +83,7 @@ async def read_loans(
             "term_frequency": loan.term_frequency,
             "repayment_type": loan.repayment_type,
             "start_date": loan.start_date,
+            "status": loan.status,
             "created_at": loan.created_at,
         }
         for loan in loans
@@ -99,6 +106,7 @@ async def read_loans_by_borrower(
             "term_frequency": loan.term_frequency,
             "repayment_type": loan.repayment_type,
             "start_date": loan.start_date,
+            "status": loan.status,
             "created_at": loan.created_at,
         }
         for loan in loans
@@ -123,4 +131,26 @@ async def delete_loan(
     result = await loan_crud.delete_loan(db, loan_id)
     if not result:
         raise HTTPException(status_code=404, detail="Loan not found")
-    return ResponseModel(success=True, message="Loan deleted successfully") 
+    return ResponseModel(success=True, message="Loan deleted successfully")
+
+@router.post("/{loan_id}/recalculate-schedule", response_model=ResponseModel)
+async def recalculate_payment_schedule(
+    loan_id: int, 
+    db: AsyncSession = Depends(get_session)
+):
+    # Get the loan
+    db_loan = await loan_crud.get_loan(db, loan_id)
+    if db_loan is None:
+        raise HTTPException(status_code=404, detail="Loan not found")
+    
+    # Delete existing payment schedule
+    from sqlmodel import delete
+    await db.execute(delete(Payment).where(Payment.loan_id == loan_id))
+    
+    # Generate new payment schedule
+    await loan_crud.generate_schedule(db, db_loan)
+    
+    return ResponseModel(
+        success=True, 
+        message=f"Payment schedule for loan {loan_id} has been recalculated."
+    ) 

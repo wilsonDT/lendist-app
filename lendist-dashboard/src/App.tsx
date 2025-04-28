@@ -4,6 +4,7 @@ import DashboardPage from './pages/DashboardPage';
 import BorrowersPage from './pages/BorrowersPage';
 import LoansPage from './pages/LoansPage';
 import LoanDetailPage from './pages/LoanDetailPage';
+import RepaymentPage from './pages/RepaymentPage';
 
 function App() {
   return (
@@ -12,6 +13,7 @@ function App() {
       <Route path="/borrowers" element={<BorrowersPage />} />
       <Route path="/loans" element={<LoansPage />} />
       <Route path="/loans/:id" element={<LoanDetailPage />} />
+      <Route path="/loans/:id/repay" element={<RepaymentPage />} />
     </Routes>
   );
 }

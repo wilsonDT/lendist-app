@@ -9,20 +9,53 @@ export interface Loan {
   term_units: number;
   term_frequency: string;
   repayment_type: string;
+  interest_cycle?: string;
   start_date: string;
   created_at: string;
   borrower_name?: string;
 }
 
 export function useLoans() {
-  return useQuery<Loan[]>(['loans'], () => 
-    api.get('/loans').then(res => res.data)
-  );
+  return useQuery<Loan[], Error>(['loans'], () => api.get('/loans').then(res => res.data));
 }
 
-export function useLoan(id: number) {
-  return useQuery<Loan>(['loan', id], () => 
-    api.get(`/loans/${id}`).then(res => res.data)
+export const useLoan = (id: number) => {
+  console.log("useLoan hook called with ID:", id, "type:", typeof id);
+  
+  return useQuery<Loan, Error>(
+    ['loan', id],
+    async () => {
+      // Skip the API call if the ID is invalid
+      if (!id || id <= 0) {
+        console.error("Invalid loan ID:", id);
+        return Promise.reject(new Error("Invalid loan ID"));
+      }
+      
+      try {
+        console.log(`Fetching loan with ID: ${id}`);
+        const response = await api.get(`/loans/${id}`);
+        console.log("Loan fetch response:", response.data);
+        return response.data;
+      } catch (error) {
+        console.error(`Error fetching loan with ID ${id}:`, error);
+        throw error;
+      }
+    },
+    {
+      enabled: !!id && id > 0,
+      staleTime: 1000 * 60 * 5, // 5 minutes
+      retry: 1, // Only retry once
+    }
+  );
+};
+
+export function useLoansByBorrower(borrowerId: number) {
+  return useQuery<Loan[], Error>(
+    ['loans', 'borrower', borrowerId], 
+    () => api.get(`/loans/borrower/${borrowerId}`).then(res => res.data),
+    {
+      enabled: !!borrowerId
+    }
   );
 }
 

@@ -4,18 +4,19 @@ from typing import Optional
 
 class BorrowerBase(BaseModel):
     name: str
-    mobile: Optional[str] = None
-    email: Optional[str] = None
-    address: Optional[str] = None
+    mobile: str
 
 class BorrowerCreate(BorrowerBase):
     pass
 
-class BorrowerUpdate(BorrowerBase):
+class BorrowerUpdate(BaseModel):
     name: Optional[str] = None
+    mobile: Optional[str] = None
 
-class BorrowerResponse(BorrowerBase):
+class BorrowerResponse(BaseModel):
     id: int
+    name: str
+    mobile: Optional[str] = None
     created_at: datetime
 
     class Config:
