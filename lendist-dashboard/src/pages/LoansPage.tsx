@@ -41,12 +41,14 @@ export default function LoansPage() {
 
   // Function to get status display
   const getLoanStatus = (loan: Loan) => {
-    return loan.term_frequency || "active";
+    // Capitalize first letter of status
+    const status = loan.status || "active";
+    return status.charAt(0).toUpperCase() + status.slice(1);
   };
 
   // Function to format term
   const formatTerm = (loan: Loan) => {
-    return `${loan.term_units} ${loan.term_frequency}`;
+    return `${loan.term_units} ${loan.term_frequency.toLowerCase()}`;
   };
 
   return (
@@ -90,7 +92,15 @@ export default function LoansPage() {
                         <TableCell>{formatCurrency(loan.principal)}</TableCell>
                         <TableCell>{new Date(loan.start_date).toLocaleDateString()}</TableCell>
                         <TableCell>
-                          <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-500">
+                          <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+                            loan.status === 'active' 
+                              ? "bg-emerald-500/10 text-emerald-500" 
+                              : loan.status === 'completed'
+                                ? "bg-gray-100 text-gray-500"
+                                : loan.status === 'defaulted'
+                                  ? "bg-red-100 text-red-500"
+                                  : "bg-yellow-100 text-yellow-500"
+                          }`}>
                             {getLoanStatus(loan)}
                           </span>
                         </TableCell>

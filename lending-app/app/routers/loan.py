@@ -24,6 +24,16 @@ class LoanCreatedResponse(BaseModel):
     status: str
     message: str = "Loan created successfully"
 
+# Add status update schema
+class LoanStatusUpdate(BaseModel):
+    status: str
+
+# Add class to match the response format
+class LoanStatusUpdatedResponse(BaseModel):
+    id: int
+    status: str
+    message: str = "Loan status updated successfully"
+
 @router.post("/", response_model=LoanCreatedResponse, status_code=status.HTTP_201_CREATED)
 async def create_loan(
     loan: LoanCreate, 
@@ -153,4 +163,33 @@ async def recalculate_payment_schedule(
     return ResponseModel(
         success=True, 
         message=f"Payment schedule for loan {loan_id} has been recalculated."
+    )
+
+@router.patch("/{loan_id}/status", response_model=LoanStatusUpdatedResponse)
+async def update_loan_status(
+    loan_id: int,
+    status_update: LoanStatusUpdate,
+    db: AsyncSession = Depends(get_session)
+):
+    # Get the loan
+    db_loan = await loan_crud.get_loan(db, loan_id)
+    if db_loan is None:
+        raise HTTPException(status_code=404, detail="Loan not found")
+    
+    # Validate status
+    valid_statuses = ["active", "completed", "defaulted", "cancelled"]
+    if status_update.status not in valid_statuses:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+        )
+    
+    # Update the status
+    db_loan.status = status_update.status
+    await db.commit()
+    await db.refresh(db_loan)
+    
+    return LoanStatusUpdatedResponse(
+        id=db_loan.id,
+        status=db_loan.status
     ) 

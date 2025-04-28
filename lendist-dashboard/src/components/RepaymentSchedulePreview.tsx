@@ -49,6 +49,10 @@ export function RepaymentSchedulePreview({
           return addMonths(currentDate, 1); // Default to monthly
       }
     };
+    
+    // Important: Set the first payment date to be one term after the start date
+    // This ensures the first payment doesn't happen on the same day as the loan starts
+    currentDate = getNextPaymentDate(currentDate);
 
     // Handle one-time interest vs other interest cycles
     const isOneTimeInterest = interestCycle.toLowerCase() === "one-time";
@@ -225,12 +229,31 @@ export function RepaymentSchedulePreview({
     );
   }
 
+  // Calculate the total amounts
+  const totalPayment = repaymentSchedule.reduce((total, payment) => total + payment.amount, 0);
+  const totalPrincipal = principal;
+  const totalInterest = totalPayment - totalPrincipal;
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-lg">Repayment Schedule Preview</CardTitle>
       </CardHeader>
       <CardContent>
+        <div className="mb-4 grid grid-cols-3 gap-4 text-sm">
+          <div>
+            <p className="text-muted-foreground">First Payment</p>
+            <p className="font-medium">{repaymentSchedule.length > 0 ? format(repaymentSchedule[0].dueDate, "MMM d, yyyy") : "N/A"}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Total Interest</p>
+            <p className="font-medium">{formatCurrency(totalInterest)}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Total Payment</p>
+            <p className="font-medium">{formatCurrency(totalPayment)}</p>
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>

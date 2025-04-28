@@ -95,6 +95,29 @@ export function useCollectPayment() {
   );
 }
 
+// Add mutation for updating an existing payment
+export function useUpdatePayment() {
+  const queryClient = useQueryClient();
+  
+  return useMutation(
+    (payload: { paymentId: number; loanId: number; amount_paid: number; paid_at: string }) => 
+      api.put(`/payments/${payload.paymentId}`, {
+        amount_paid: payload.amount_paid,
+        paid_at: payload.paid_at
+      }).then(res => res.data),
+    {
+      onSuccess: (data, variables) => {
+        // Invalidate all related queries to refresh UI
+        queryClient.invalidateQueries(['loan', variables.loanId]);
+        queryClient.invalidateQueries(['loans']);
+        queryClient.invalidateQueries(['payments', 'loan', variables.loanId]);
+        queryClient.invalidateQueries(['payments', 'recent']);
+        queryClient.invalidateQueries(['dashboardSummary']);
+      }
+    }
+  );
+}
+
 // Add a mutation to recalculate a loan's payment schedule
 export function useRecalculatePayments() {
   const queryClient = useQueryClient();

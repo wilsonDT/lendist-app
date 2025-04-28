@@ -55,8 +55,23 @@ async def generate_schedule(db: Session, loan: Loan) -> None:
     # Set default interest cycle if not specified
     interest_cycle = getattr(loan, 'interest_cycle', 'yearly')
     
-    # Calculate the proper due dates based on frequency
-    next_due_date = loan.start_date
+    # Start with the loan's start date
+    start_date = loan.start_date
+    
+    # Calculate the first payment due date (one term period after start date)
+    if loan.term_frequency.lower() == 'daily':
+        next_due_date = start_date + timedelta(days=1)
+    elif loan.term_frequency.lower() == 'weekly':
+        next_due_date = start_date + timedelta(days=7)
+    elif loan.term_frequency.lower() == 'monthly':
+        next_due_date = add_months(start_date, 1)
+    elif loan.term_frequency.lower() == 'quarterly':
+        next_due_date = add_months(start_date, 3)
+    elif loan.term_frequency.lower() == 'yearly':
+        next_due_date = add_months(start_date, 12)
+    else:
+        # Default to monthly if frequency not recognized
+        next_due_date = add_months(start_date, 1)
     
     # Calculate annual interest rate based on interest cycle
     annual_rate = loan.interest_rate_percent
@@ -88,20 +103,17 @@ async def generate_schedule(db: Session, loan: Loan) -> None:
         payment_amount = principal_per_period + interest_per_period
         
         for i in range(loan.term_units):
-            # Calculate next due date
+            # First payment date was already calculated above, so only calculate subsequent dates
             if i > 0:
                 if loan.term_frequency.lower() == 'daily':
                     next_due_date = next_due_date + timedelta(days=1)
                 elif loan.term_frequency.lower() == 'weekly':
                     next_due_date = next_due_date + timedelta(days=7)
                 elif loan.term_frequency.lower() == 'monthly':
-                    # Add one month (approximately 30 days)
                     next_due_date = add_months(next_due_date, 1)
                 elif loan.term_frequency.lower() == 'quarterly':
-                    # Add three months (approximately 90 days)
                     next_due_date = add_months(next_due_date, 3)
                 elif loan.term_frequency.lower() == 'yearly':
-                    # Add one year (approximately 365 days)
                     next_due_date = add_months(next_due_date, 12)
             
             db.add(Payment(
@@ -118,7 +130,7 @@ async def generate_schedule(db: Session, loan: Loan) -> None:
         remaining_principal = loan.principal
         
         for i in range(loan.term_units):
-            # Calculate next due date
+            # First payment date was already calculated above, so only calculate subsequent dates
             if i > 0:
                 if loan.term_frequency.lower() == 'daily':
                     next_due_date = next_due_date + timedelta(days=1)
