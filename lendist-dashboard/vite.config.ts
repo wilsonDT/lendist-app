@@ -14,6 +14,7 @@ export default defineConfig({
   resolve: { 
     alias: {
       '@': path.resolve(__dirname, './src'), // Corrected: Use the derived __dirname
+      '@/lib/utils': path.resolve(__dirname, './src/lib/utils.ts') // Add specific alias
     },
   },
 }); 
