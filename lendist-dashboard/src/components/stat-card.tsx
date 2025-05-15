@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { cn } from "../lib/utils";
+import { cn } from "@/lib/utils";
 import type { LucideIcon } from "lucide-react";
 
 interface StatCardProps {
@@ -16,7 +16,7 @@ interface StatCardProps {
 
 export function StatCard({ title, value, description, icon: Icon, iconColor, trend }: StatCardProps) {
   return (
-    <Card className="overflow-hidden border-border/40">
+    <Card className="overflow-hidden">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
         {Icon && (
