@@ -12,8 +12,19 @@ from sqlmodel import SQLModel
 # access to the values within the .ini file in use.
 config = context.config
 
-# Set the SQLAlchemy URL from our app settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Get the original database URL from settings
+original_db_url = settings.DATABASE_URL
+sync_db_url = original_db_url
+
+# Convert asyncpg DSN to a synchronous one for Alembic
+if original_db_url and original_db_url.startswith("postgresql+asyncpg://"):
+    sync_db_url = original_db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+elif original_db_url and original_db_url.startswith("sqlite+aiosqlite://"):
+    # Example if you were using aiosqlite, convert to standard sqlite for alembic
+    sync_db_url = original_db_url.replace("sqlite+aiosqlite://", "sqlite://", 1)
+
+# Set the potentially modified (synchronous) SQLAlchemy URL for Alembic
+config.set_main_option("sqlalchemy.url", sync_db_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -44,9 +55,9 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    # url = config.get_main_option("sqlalchemy.url") # Already set above with sync_db_url
     context.configure(
-        url=url,
+        url=sync_db_url, # Use the modified sync_db_url
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -63,10 +74,14 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # engine_from_config will now use the sync_db_url set in config.set_main_option
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        # Ensure the URL used here is the synchronous one explicitly if needed,
+        # though engine_from_config should pick it from main_option
+        # url=sync_db_url 
     )
 
     with connectable.connect() as connection:

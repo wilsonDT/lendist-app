@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button"
 import { Card, CardContent } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import { Progress } from "../components/ui/progress"
-import { ArrowLeft, Calendar, CreditCard, DollarSign, User, Clock, FileText, CheckCircle2, PlusCircle, AlertCircle, RotateCw } from "lucide-react"
+import { ArrowLeft, Calendar, CreditCard, DollarSign, User, Clock, FileText, CheckCircle2, PlusCircle, AlertCircle, RotateCw, RefreshCcw } from "lucide-react"
 import { LoanDetailPageSkeleton } from "../components/skeleton-layout"
 import { useLoan, useUpdateLoanStatus } from "../hooks/useLoans"
 import { usePaymentsByLoan, useRecalculatePayments } from "../hooks/usePayments"
@@ -15,6 +15,18 @@ import { formatCurrency } from "../lib/utils"
 import { useToast } from "../components/ui/use-toast"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { PaymentStatus } from "../components/PaymentStatus"
+import { useMutation } from "@tanstack/react-query"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 
 // Payment interface
 interface Payment {
@@ -164,11 +176,55 @@ export default function LoanDetailPage() {
   // Add status update mutation
   const updateLoanStatusMutation = useUpdateLoanStatus()
 
-  // Track if status has been updated to avoid unnecessary API calls
-  const [statusUpdated, setStatusUpdated] = useState(false)
-  
-  // Cast loan to use the actual status from the API
+  // State for confirmation dialogs
+  const [isRecalculateConfirmOpen, setIsRecalculateConfirmOpen] = useState(false);
+  const [isRenewConfirmOpen, setIsRenewConfirmOpen] = useState(false);
+  const [isUpdateStatusConfirmOpen, setIsUpdateStatusConfirmOpen] = useState(false);
+  const [statusToUpdate, setStatusToUpdate] = useState<string | null>(null);
+
   const loan = loanData;
+
+  // Use useCallback for refreshAllData
+  const refreshAllData = useCallback(async () => {
+    console.log("Refreshing loan and payment data triggered by refreshAllData callback...");
+    try {
+      await refetchLoan();
+      await refetchPayments();
+    } catch (err) {
+      console.error("Error during refreshAllData:", err);
+      // Optionally, show a toast or handle error
+    }
+  }, [refetchLoan, refetchPayments]); // Dependencies for useCallback
+  
+  // Mutation for renewing the loan (should be preserved)
+  const renewLoanMutation = useMutation(
+    async (loanIdToRenew: number): Promise<ExtendedLoan> => { 
+      const response = await api.post(`/loans/${loanIdToRenew}/renew`);
+      return response.data as ExtendedLoan; 
+    },
+    {
+      onSuccess: (newlyCreatedLoan: ExtendedLoan) => { 
+        console.log("Renew loan onSuccess triggered. Data:", newlyCreatedLoan);
+        toast({
+          title: "Loan Renewed Successfully",
+          description: `Old loan #${loanId} marked completed. New loan #${newlyCreatedLoan.id} created.`,
+          variant: "default",
+        });
+        
+        console.log("Attempting to navigate to /loans");
+        navigate("/loans");
+      },
+      onError: (error: any) => {
+        console.error("Renew loan onError triggered:", error);
+        console.error("Error renewing loan:", error);
+        toast({
+          title: "Renewal Failed",
+          description: error.response?.data?.detail || "Failed to renew the loan. Please ensure the backend supports this feature.",
+          variant: "destructive",
+        });
+      },
+    }
+  );
   
   // Log the error if there is one
   useEffect(() => {
@@ -179,25 +235,19 @@ export default function LoanDetailPage() {
 
   // Add effect to refresh data when returning from payment page or on regular intervals
   useEffect(() => {
-    // Refetch all data immediately when the component mounts
-    const refreshAllData = async () => {
-      console.log("Refreshing loan and payment data...");
-      setStatusUpdated(false); // Reset the status update flag
-      await refetchLoan();
-      await refetchPayments();
-    };
-    
+    // Initial fetch when component mounts (or refreshAllData reference changes)
     refreshAllData();
     
     // Also set up a refresh interval (e.g., every 30 seconds) to catch updates made elsewhere
     const refreshInterval = setInterval(() => {
+      console.log("Refreshing loan and payment data due to interval...");
       refreshAllData();
     }, 30000); // 30 seconds
     
     return () => {
       clearInterval(refreshInterval);
     };
-  }, [refetchLoan, refetchPayments]);
+  }, [refreshAllData]); // Now, this effect only re-runs if refreshAllData's reference changes.
   
   const [paymentSchedule, setPaymentSchedule] = useState<Payment[]>([])
   const [paymentProgress, setPaymentProgress] = useState(0)
@@ -246,7 +296,7 @@ export default function LoanDetailPage() {
 
   // Process fetched payment data and update loan status if needed
   useEffect(() => {
-    if (payments && loan && !isLoading && !statusUpdated) {
+    if (payments && loan && !isLoading) {
       // Use the fetched payments directly
       setPaymentSchedule(payments);
 
@@ -269,44 +319,26 @@ export default function LoanDetailPage() {
       // Check if all payments are complete
       const allPaymentsComplete = payments.every(p => p.paid_at !== null && p.amount_paid >= p.amount_due);
       
-      // Only update status in the database if it needs to change
+      let newStatusToSet: string | null = null;
+
       if (allPaymentsComplete && loan.status !== "completed") {
-        console.log("All payments complete. Updating loan status to completed.");
-        updateLoanStatusMutation.mutate(
-          { loanId: loan.id, status: "completed" }, 
-          {
-            onSuccess: () => {
-              toast({
-                title: "Status Updated",
-                description: "Loan status updated to completed.",
-                variant: "default"
-              });
-              setStatusUpdated(true);
-              refetchLoan(); // Refresh loan data with updated status
-            },
-            onError: (error) => {
-              console.error("Error updating loan status:", error);
-              toast({
-                title: "Error",
-                description: "Failed to update loan status.",
-                variant: "destructive"
-              });
-            }
-          }
-        );
+        newStatusToSet = "completed";
       } else if (!allPaymentsComplete && loan.status === "completed") {
-        // If not all payments are complete but loan is marked as completed, update back to active
-        console.log("Not all payments complete. Updating loan status to active.");
+        newStatusToSet = "active";
+      }
+      
+      // Only update status in the database if it needs to change and no mutation is currently loading
+      if (newStatusToSet && !updateLoanStatusMutation.isLoading) {
+        console.log(`Loan ${loan.id}: Current status is '${loan.status}', payments imply '${newStatusToSet}'. Attempting to update.`);
         updateLoanStatusMutation.mutate(
-          { loanId: loan.id, status: "active" }, 
+          { loanId: loan.id, status: newStatusToSet }, 
           {
             onSuccess: () => {
               toast({
                 title: "Status Updated",
-                description: "Loan status updated to active.",
+                description: `Loan status updated to ${newStatusToSet}.`,
                 variant: "default"
               });
-              setStatusUpdated(true);
               refetchLoan(); // Refresh loan data with updated status
             },
             onError: (error) => {
@@ -321,12 +353,10 @@ export default function LoanDetailPage() {
         );
       }
     }
-  }, [payments, loan, isLoading, updateLoanStatusMutation, toast, refetchLoan, statusUpdated]);
+  }, [payments, loan, isLoading, updateLoanStatusMutation, toast, refetchLoan]);
 
-  // Handle payment recalculation
-  const handleRecalculatePayments = () => {
+  const confirmRecalculatePayments = () => {
     if (!loan) return;
-    
     recalculatePaymentsMutation.mutate(loan.id, {
       onSuccess: () => {
         toast({
@@ -334,8 +364,7 @@ export default function LoanDetailPage() {
           description: "Payment schedule recalculated successfully!",
           variant: "default"
         });
-        refetchPayments(); // Refresh the payments data
-        setStatusUpdated(false); // Check status again after recalculation
+        refetchPayments(); 
       },
       onError: (error) => {
         console.error("Error recalculating payments:", error);
@@ -348,18 +377,22 @@ export default function LoanDetailPage() {
     });
   };
 
-  // Manually update loan status if needed
-  const handleUpdateStatus = (newStatus: string) => {
-    if (!loan || loan.status === newStatus) return;
+  const confirmRenewLoan = () => {
+    if (!loan) return;
+    renewLoanMutation.mutate(loan.id);
+  };
+
+  const confirmUpdateStatus = () => {
+    if (!loan || !statusToUpdate || loan.status === statusToUpdate) return;
     
-    updateLoanStatusMutation.mutate({ loanId: loan.id, status: newStatus }, {
+    updateLoanStatusMutation.mutate({ loanId: loan.id, status: statusToUpdate }, {
       onSuccess: () => {
         toast({
           title: "Status Updated",
-          description: `Loan status updated to ${newStatus}.`,
+          description: `Loan status updated to ${statusToUpdate}.`,
           variant: "default"
         });
-        refetchLoan(); // Refresh loan data
+        refetchLoan(); 
       },
       onError: (error) => {
         console.error("Error updating loan status:", error);
@@ -368,6 +401,9 @@ export default function LoanDetailPage() {
           description: "Failed to update loan status.",
           variant: "destructive"
         });
+      },
+      onSettled: () => {
+        setStatusToUpdate(null); // Reset status to update
       }
     });
   };
@@ -409,6 +445,9 @@ export default function LoanDetailPage() {
     }
   };
 
+  const isLoanCompleted = loan.status === "completed";
+  const isLoanCancelled = loan.status === "cancelled"; // Added for renew button logic
+
   return (
     <div className="min-h-screen flex">
       <Sidebar />
@@ -421,10 +460,37 @@ export default function LoanDetailPage() {
               Back to Loans
             </Button>
             <div className="flex gap-2">
-              <Button onClick={handleRecalculatePayments} variant="outline" size="sm">
-                Recalculate Payments
-              </Button>
-              <Button onClick={() => navigate(`/loans/${loanId}/repay`)} variant="default" size="sm">
+              {/* Recalculate Button with Confirmation */}
+              <AlertDialog open={isRecalculateConfirmOpen} onOpenChange={setIsRecalculateConfirmOpen}>
+                <AlertDialogTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    disabled={recalculatePaymentsMutation.isLoading || isLoanCompleted || isLoanCancelled}
+                  >
+                    Recalculate Payments
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will recalculate the payment schedule for this loan. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={confirmRecalculatePayments}>Confirm</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              <Button 
+                onClick={() => navigate(`/loans/${loanId}/repay`)} 
+                variant="default" 
+                size="sm"
+                disabled={isLoanCompleted || isLoanCancelled}
+              >
                 Record Payment
               </Button>
             </div>
@@ -439,7 +505,7 @@ export default function LoanDetailPage() {
                 <p className="text-sm text-muted-foreground">Total loan value</p>
                 <div className="flex items-center mt-2">
                   <DollarSign className="h-6 w-6 text-primary mr-2" />
-                  <span className="text-2xl font-bold">₱{formatCurrency(loan.principal)}</span>
+                  <span className="text-2xl font-bold">{formatCurrency(loan.principal)}</span>
                 </div>
               </CardContent>
             </Card>
@@ -454,7 +520,7 @@ export default function LoanDetailPage() {
                 <div className="flex items-center mt-2">
                   <Calendar className="h-6 w-6 text-primary mr-2" />
                   <span className="text-2xl font-bold">
-                    ₱{formatCurrency(nextPaymentDisplayAmount)}
+                    {formatCurrency(nextPaymentDisplayAmount)}
                   </span>
                 </div>
               </CardContent>
@@ -467,8 +533,8 @@ export default function LoanDetailPage() {
                 <p className="text-sm text-muted-foreground">{paymentProgress}% completed</p>
                 <Progress value={paymentProgress} className="mt-2 h-2" />
                 <div className="flex justify-between text-sm mt-2">
-                  <span>Paid: ₱{formatCurrency(totalPaid)}</span>
-                  <span>Remaining: ₱{formatCurrency(totalDue - totalPaid)}</span>
+                  <span>Paid: {formatCurrency(totalPaid)}</span>
+                  <span>Remaining: {formatCurrency(totalDue - totalPaid)}</span>
                 </div>
               </CardContent>
             </Card>
@@ -539,37 +605,94 @@ export default function LoanDetailPage() {
                   <Button 
                     className="w-full"
                     onClick={() => navigate(`/loans/${loan.id}/repay`)}
-                    disabled={loan.status === "completed"}
+                    disabled={isLoanCompleted || isLoanCancelled}
                   >
                     Record Payment
                   </Button>
                   
-                  <Button 
-                    variant="outline" 
-                    className="w-full"
-                    onClick={handleRecalculatePayments}
-                    disabled={recalculatePaymentsMutation.isLoading}
-                  >
-                    <RotateCw className="mr-2 h-4 w-4" />
-                    {recalculatePaymentsMutation.isLoading ? "Recalculating..." : "Recalculate Payments"}
-                  </Button>
+                  {/* Recalculate Payments with Confirmation */}
+                  <AlertDialog open={isRecalculateConfirmOpen} onOpenChange={setIsRecalculateConfirmOpen}>
+                    <AlertDialogTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        className="w-full"
+                        disabled={recalculatePaymentsMutation.isLoading || isLoanCompleted || isLoanCancelled}
+                      >
+                        <RotateCw className="mr-2 h-4 w-4" />
+                        {recalculatePaymentsMutation.isLoading ? "Recalculating..." : "Recalculate Payments"}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Confirm Recalculation</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Are you sure you want to recalculate the payment schedule for this loan? This may alter existing payment amounts and due dates.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmRecalculatePayments}>Confirm</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+
+                  {/* Renew Loan with Confirmation */}
+                  <AlertDialog open={isRenewConfirmOpen} onOpenChange={setIsRenewConfirmOpen}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        disabled={!loan || isLoanCompleted || isLoanCancelled || renewLoanMutation.isLoading}
+                      >
+                        <RefreshCcw className="mr-2 h-4 w-4" />
+                        {renewLoanMutation.isLoading ? "Renewing Loan..." : "Renew Loan"}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Confirm Loan Renewal</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will mark the current loan as completed (all outstanding payments will be marked as paid) and create a new loan with the same terms, starting today. Are you sure?
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmRenewLoan}>Confirm Renewal</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                   
-                  {/* Status Update Dropdown */}
+                  {/* Status Update Dialog (common for multiple status buttons) */}
+                  <AlertDialog open={isUpdateStatusConfirmOpen} onOpenChange={setIsUpdateStatusConfirmOpen}>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Confirm Status Change</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {`Are you sure you want to change the loan status to "${statusToUpdate}"?`}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setStatusToUpdate(null)}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmUpdateStatus}>Confirm</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  
                   <div className="flex space-x-2">
-                    {loan.status !== "active" && (
+                    {loan.status !== "active" && !isLoanCompleted && !isLoanCancelled && (
                       <Button 
                         variant="outline" 
                         className="flex-1"
-                        onClick={() => handleUpdateStatus("active")}
+                        onClick={() => { setStatusToUpdate("active"); setIsUpdateStatusConfirmOpen(true); }}
                       >
                         Set Active
                       </Button>
                     )}
-                    {loan.status !== "completed" && (
+                    {loan.status !== "completed" && !isLoanCancelled && ( // Allow marking active/defaulted as complete
                       <Button 
                         variant="outline" 
                         className="flex-1"
-                        onClick={() => handleUpdateStatus("completed")}
+                        onClick={() => { setStatusToUpdate("completed"); setIsUpdateStatusConfirmOpen(true); }}
                       >
                         Mark Complete
                       </Button>
@@ -618,7 +741,7 @@ export default function LoanDetailPage() {
                           {paymentSchedule.map((payment) => (
                             <tr key={payment.id} className="border-b border-border">
                               <td className="py-4 px-4">{payment.due_date}</td>
-                              <td className="py-4 px-4 font-medium">₱{formatCurrency(payment.amount_due)}</td>
+                              <td className="py-4 px-4 font-medium">{formatCurrency(payment.amount_due)}</td>
                               <td className="py-4 px-4">
                                 <PaymentStatus payment={payment} />
                               </td>
@@ -657,7 +780,7 @@ export default function LoanDetailPage() {
                               </p>
                             </div>
                             <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
-                              ₱{formatCurrency(payment.amount_paid)}
+                              {formatCurrency(payment.amount_paid)}
                             </Badge>
                           </div>
                         ))

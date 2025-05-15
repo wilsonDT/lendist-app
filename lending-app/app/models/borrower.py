@@ -7,6 +7,7 @@ if TYPE_CHECKING:
 
 class Borrower(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
     name: str
     mobile: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow) 

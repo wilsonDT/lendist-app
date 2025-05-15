@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 class Loan(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)
     borrower_id: int = Field(foreign_key="borrower.id")
     borrower: Borrower | None = Relationship(back_populates="loans")
     principal: float

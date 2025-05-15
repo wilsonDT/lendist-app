@@ -5,6 +5,8 @@ from typing import Dict, Any, List
 from sqlalchemy import extract
 
 from app.core.database import get_session
+from app.core.auth import get_current_user
+from app.models.user import User
 from app.models.loan import Loan
 from app.models.payment import Payment
 from app.models.borrower import Borrower
@@ -14,27 +16,29 @@ import calendar
 router = APIRouter()
 
 @router.get("/summary")
-async def get_dashboard_summary(db: AsyncSession = Depends(get_session)):
+async def get_dashboard_summary(db: AsyncSession = Depends(get_session), current_user: User = Depends(get_current_user)):
     today = date.today()
+    user_id = current_user.id
     
     # Count active borrowers
-    borrower_count_result = await db.execute(select(func.count()).select_from(Borrower))
+    borrower_count_result = await db.execute(select(func.count()).select_from(Borrower).where(Borrower.user_id == user_id))
     active_borrowers = borrower_count_result.scalar() or 0
     
     # Count loans
-    loan_count_result = await db.execute(select(func.count()).select_from(Loan))
+    loan_count_result = await db.execute(select(func.count()).select_from(Loan).where(Loan.user_id == user_id))
     loan_count = loan_count_result.scalar() or 0
     
     # Get all active loans with outstanding balances
     # Calculate the total loans value (includes both principal and interest)
     outstanding_balance_result = await db.execute(
         select(func.sum(Payment.amount_due - Payment.amount_paid))
-        .where(Payment.amount_paid < Payment.amount_due)
+        .join(Loan, Payment.loan_id == Loan.id)
+        .where(Payment.amount_paid < Payment.amount_due, Loan.user_id == user_id)
     )
     outstanding_balance = outstanding_balance_result.scalar() or 0
     
     # Also get the principal sum for historical comparison
-    principal_result = await db.execute(select(func.sum(Loan.principal)))
+    principal_result = await db.execute(select(func.sum(Loan.principal)).where(Loan.user_id == user_id))
     principal_sum = principal_result.scalar() or 0
     
     # Use the sum of outstanding balances as the total loans amount
@@ -43,14 +47,16 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_session)):
     # Sum payments due today
     due_today_result = await db.execute(
         select(func.sum(Payment.amount_due - Payment.amount_paid))
-        .where(Payment.due_date == today, Payment.amount_paid < Payment.amount_due)
+        .join(Loan, Payment.loan_id == Loan.id)
+        .where(Payment.due_date == today, Payment.amount_paid < Payment.amount_due, Loan.user_id == user_id)
     )
     due_today = due_today_result.scalar() or 0
     
     # Sum overdue payments
     overdue_result = await db.execute(
         select(func.sum(Payment.amount_due - Payment.amount_paid))
-        .where(Payment.due_date < today, Payment.amount_paid < Payment.amount_due)
+        .join(Loan, Payment.loan_id == Loan.id)
+        .where(Payment.due_date < today, Payment.amount_paid < Payment.amount_due, Loan.user_id == user_id)
     )
     overdue_amount = overdue_result.scalar() or 0
     
@@ -62,7 +68,7 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_session)):
     last_week_outstanding_result = await db.execute(
         select(func.sum(Payment.amount_due - Payment.amount_paid))
         .join(Loan, Payment.loan_id == Loan.id)
-        .where(Loan.created_at <= last_week, Payment.amount_paid < Payment.amount_due)
+        .where(Loan.created_at <= last_week, Payment.amount_paid < Payment.amount_due, Loan.user_id == user_id)
     )
     last_week_outstanding = last_week_outstanding_result.scalar() or 1  # avoid division by zero
     
@@ -70,7 +76,7 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_session)):
     last_week_borrowers_result = await db.execute(
         select(func.count())
         .select_from(Borrower)
-        .where(Borrower.created_at <= last_week)
+        .where(Borrower.created_at <= last_week, Borrower.user_id == user_id)
     )
     last_week_borrowers = last_week_borrowers_result.scalar() or 1  # avoid division by zero
     
@@ -97,7 +103,8 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_session)):
 @router.get("/expected-profit", response_model=List[Dict[str, Any]])
 async def get_expected_monthly_profit(
     months: int = 12,
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Calculate expected profit per month for the next X months (default 12).
@@ -105,6 +112,7 @@ async def get_expected_monthly_profit(
     """
     today = date.today()
     result = []
+    user_id = current_user.id
     
     # Calculate the expected profit for each month
     for i in range(months):
@@ -127,7 +135,8 @@ async def get_expected_monthly_profit(
         ).where(
             Payment.due_date >= first_day,
             Payment.due_date <= last_day,
-            Loan.status == "active"
+            Loan.status == "active",
+            Loan.user_id == user_id
         )
         
         total_due_result = await db.execute(query)
@@ -141,7 +150,8 @@ async def get_expected_monthly_profit(
         ).where(
             Payment.due_date >= first_day,
             Payment.due_date <= last_day,
-            Loan.status == "active"
+            Loan.status == "active",
+            Loan.user_id == user_id
         )
         
         principal_result = await db.execute(principal_query)

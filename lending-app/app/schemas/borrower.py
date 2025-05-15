@@ -15,6 +15,7 @@ class BorrowerUpdate(BaseModel):
 
 class BorrowerResponse(BaseModel):
     id: int
+    user_id: str
     name: str
     mobile: Optional[str] = None
     created_at: datetime

@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from datetime import datetime
 from sqlmodel import select, desc
 
 from app.core.database import get_session
-from app.schemas.payment import PaymentResponse, PaymentUpdate
+from app.core.auth import get_current_user, User
+from app.schemas.payment import PaymentResponse, PaymentUpdate, PaymentCreate
 from app.crud import payment as payment_crud
+from app.crud import loan as loan_crud
 from app.models.payment import Payment
 from app.models.loan import Loan
 from app.models.borrower import Borrower
@@ -16,18 +18,18 @@ from app.crud.loan import generate_schedule  # Import the payment calculation lo
 router = APIRouter()
 
 # Helper function to calculate the correct payment amount based on loan details
-async def calculate_payment_amount(db: AsyncSession, loan_id: int) -> float:
+async def calculate_payment_amount(db: AsyncSession, loan_id: int, user_id: str) -> float:
     """
     Calculate the correct payment amount considering the loan's interest_cycle.
     Returns the payment amount per period.
     """
     # Get the loan details
-    loan_query = select(Loan).where(Loan.id == loan_id)
+    loan_query = select(Loan).where(Loan.id == loan_id).where(Loan.user_id == user_id)
     result = await db.execute(loan_query)
     loan = result.scalars().first()
     
     if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
+        raise HTTPException(status_code=404, detail="Loan not found or not owned by user")
     
     # Check if this is a one-time interest loan
     is_one_time_interest = loan.interest_cycle and loan.interest_cycle.lower() == "one-time"
@@ -96,14 +98,16 @@ async def calculate_payment_amount(db: AsyncSession, loan_id: int) -> float:
 class PaymentSimpleResponse(BaseModel):
     id: int
     loan_id: int
+    user_id: str
     due_date: str
     amount_due: float
     amount_paid: float
-    paid_at: datetime = None
+    paid_at: Optional[datetime] = None
 
 class PaymentCollected(BaseModel):
     id: int
     loan_id: int
+    user_id: str
     amount_due: float
     amount_paid: float
     paid_at: datetime
@@ -112,6 +116,7 @@ class PaymentCollected(BaseModel):
 class RecentPaymentResponse(BaseModel):
     id: int
     loan_id: int
+    user_id: str
     borrower_id: int
     borrower_name: str
     amount_paid: float
@@ -121,26 +126,29 @@ class RecentPaymentResponse(BaseModel):
 @router.get("/{payment_id}", response_model=PaymentResponse)
 async def read_payment(
     payment_id: int, 
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
-    db_payment = await payment_crud.get_payment(db, payment_id)
+    db_payment = await payment_crud.get_payment(db, payment_id, user_id=current_user.id)
     if db_payment is None:
-        raise HTTPException(status_code=404, detail="Payment not found")
+        raise HTTPException(status_code=404, detail="Payment not found or not owned by user")
     return db_payment
 
 @router.get("/", response_model=List[PaymentResponse])
 async def read_payments(
     skip: int = 0, 
     limit: int = 100, 
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
-    payments = await payment_crud.get_payments(db, skip=skip, limit=limit)
+    payments = await payment_crud.get_payments(db, user_id=current_user.id, skip=skip, limit=limit)
     return payments
 
 @router.get("/recent/", response_model=List[RecentPaymentResponse])
 async def get_recent_payments(
     limit: int = 10,
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
     # Get payments that have been paid (paid_at is not null)
     query = (
@@ -148,6 +156,7 @@ async def get_recent_payments(
         .join(Loan, Payment.loan_id == Loan.id)
         .join(Borrower, Loan.borrower_id == Borrower.id)
         .where(Payment.paid_at.is_not(None))
+        .where(Payment.user_id == current_user.id)
         .order_by(desc(Payment.paid_at))
         .limit(limit)
     )
@@ -160,6 +169,7 @@ async def get_recent_payments(
             RecentPaymentResponse(
                 id=payment.id,
                 loan_id=payment.loan_id,
+                user_id=payment.user_id,
                 borrower_id=borrower.id,
                 borrower_name=borrower.name,
                 amount_paid=payment.amount_paid,
@@ -170,156 +180,140 @@ async def get_recent_payments(
     
     return recent_payments
 
-@router.get("/loan/{loan_id}", response_model=List[Dict[str, Any]])
+@router.get("/loan/{loan_id}", response_model=List[PaymentSimpleResponse])
 async def read_payments_by_loan(
     loan_id: int, 
     recalculate: bool = False,
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
-    payments = await payment_crud.get_payments_by_loan(db, loan_id)
+    # First, verify the loan belongs to the user
+    db_loan = await loan_crud.get_loan(db, loan_id=loan_id, user_id=current_user.id)
+    if not db_loan:
+        raise HTTPException(status_code=404, detail="Loan not found or not owned by user")
+        
+    payments = await payment_crud.get_payments_by_loan(db, loan_id=loan_id, user_id=current_user.id)
     
-    # If recalculate is True, get the correct payment amount based on interest_cycle
     correct_amount = None
     if recalculate:
         try:
-            correct_amount = await calculate_payment_amount(db, loan_id)
+            correct_amount = await calculate_payment_amount(db, loan_id, user_id=current_user.id)
         except Exception as e:
             # Log the error but continue with stored amounts
             print(f"Error calculating payment amount: {e}")
     
     result = []
-    for payment in payments:
-        # Use recalculated amount if available
-        amount_due = correct_amount if correct_amount is not None else payment.amount_due
-        
-        result.append({
-            "id": payment.id,
-            "loan_id": payment.loan_id,
-            "due_date": str(payment.due_date),
-            "amount_due": amount_due,
-            "amount_paid": payment.amount_paid,
-            "paid_at": payment.paid_at
-        })
+    for payment_obj in payments:
+        amount_due = correct_amount if correct_amount is not None else payment_obj.amount_due
+        result.append(PaymentSimpleResponse(
+            id=payment_obj.id,
+            loan_id=payment_obj.loan_id,
+            user_id=payment_obj.user_id,
+            due_date=str(payment_obj.due_date),
+            amount_due=amount_due,
+            amount_paid=payment_obj.amount_paid,
+            paid_at=payment_obj.paid_at
+        ))
     return result
 
 @router.put("/{payment_id}", response_model=PaymentResponse)
 async def update_payment(
     payment_id: int, 
-    payment: PaymentUpdate, 
-    db: AsyncSession = Depends(get_session)
+    payment_data: PaymentUpdate,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
-    db_payment = await payment_crud.update_payment(db, payment_id, payment)
+    db_payment = await payment_crud.update_payment(db, payment_id, payment_data, user_id=current_user.id)
     if db_payment is None:
-        raise HTTPException(status_code=404, detail="Payment not found")
+        raise HTTPException(status_code=404, detail="Payment not found or not owned by user")
     return db_payment
 
 @router.get("/upcoming/", response_model=List[PaymentResponse])
 async def read_upcoming_payments(
     days: int = 7, 
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
-    payments = await payment_crud.get_upcoming_payments(db, days)
+    payments = await payment_crud.get_upcoming_payments(db, days, user_id=current_user.id)
     return payments
 
 @router.get("/overdue/", response_model=List[PaymentResponse])
 async def read_overdue_payments(
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
-    payments = await payment_crud.get_overdue_payments(db)
+    payments = await payment_crud.get_overdue_payments(db, user_id=current_user.id)
     return payments
 
 @router.post("/{payment_id}/collect", response_model=PaymentCollected)
 async def collect_payment(
     payment_id: int,
-    payment: PaymentUpdate,
-    db: AsyncSession = Depends(get_session)
+    payment_data: PaymentUpdate,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
-    db_payment = await payment_crud.update_payment(db, payment_id, payment)
+    db_payment = await payment_crud.update_payment(db, payment_id, payment_data, user_id=current_user.id, mark_as_paid=True)
     if db_payment is None:
-        raise HTTPException(status_code=404, detail="Payment not found")
+        raise HTTPException(status_code=404, detail="Payment not found or not owned by user")
     
     return PaymentCollected(
         id=db_payment.id,
         loan_id=db_payment.loan_id,
+        user_id=db_payment.user_id,
         amount_due=db_payment.amount_due,
         amount_paid=db_payment.amount_paid,
         paid_at=db_payment.paid_at
     )
 
-@router.post("/", response_model=PaymentCollected)
+@router.post("/", response_model=PaymentResponse)
 async def create_payment(
-    payment_data: Dict[str, Any],
-    db: AsyncSession = Depends(get_session)
+    payment_data: PaymentCreate,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Create a new payment record.
     This endpoint can be used for additional payments or manual corrections.
     """
-    loan_id = payment_data.get("loan_id")
-    if not loan_id:
-        raise HTTPException(status_code=400, detail="Loan ID is required")
-    
-    # Get the loan to verify it exists
-    loan_query = select(Loan).where(Loan.id == loan_id)
-    result = await db.execute(loan_query)
-    loan = result.scalars().first()
-    
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    
-    # Create new Payment object
-    new_payment = Payment(
-        loan_id=loan_id,
-        due_date=payment_data.get("due_date", datetime.now().date()),
-        amount_due=payment_data.get("amount", 0),
-        amount_paid=payment_data.get("amount", 0),
-        paid_at=payment_data.get("date", datetime.now())
-    )
-    
-    db.add(new_payment)
-    await db.commit()
-    await db.refresh(new_payment)
-    
-    return PaymentCollected(
-        id=new_payment.id,
-        loan_id=new_payment.loan_id,
-        amount_due=new_payment.amount_due,
-        amount_paid=new_payment.amount_paid,
-        paid_at=new_payment.paid_at
-    )
+    # Ensure the loan_id provided in payment_data belongs to the current_user
+    db_loan = await loan_crud.get_loan(db, loan_id=payment_data.loan_id, user_id=current_user.id)
+    if not db_loan:
+        raise HTTPException(status_code=403, detail="Loan not found or not owned by user, cannot create payment")
+
+    # Create payment, passing user_id from current_user (should match loan.user_id)
+    db_payment = await payment_crud.create_payment(db, payment_data, user_id=current_user.id)
+    return db_payment
 
 @router.post("/loan/{loan_id}/recalculate", response_model=Dict[str, Any])
 async def recalculate_loan_payments(
     loan_id: int,
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Recalculate all payment schedules for a loan based on its interest_cycle.
     """
-    # Get the loan
-    loan_query = select(Loan).where(Loan.id == loan_id)
-    result = await db.execute(loan_query)
-    loan = result.scalars().first()
-    
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
+    # First, verify the loan belongs to the user
+    db_loan = await loan_crud.get_loan(db, loan_id=loan_id, user_id=current_user.id)
+    if not db_loan:
+        raise HTTPException(status_code=404, detail="Loan not found or not owned by user")
     
     try:
         # Delete existing payments
         from sqlmodel import delete
-        await db.execute(delete(Payment).where(Payment.loan_id == loan_id))
+        await db.execute(delete(Payment).where(Payment.loan_id == loan_id).where(Payment.user_id == current_user.id))
         
-        # Generate new payment schedule
-        await generate_schedule(db, loan)
+        # Regenerate schedule (generate_schedule in loan_crud already handles user_id for new payments)
+        await loan_crud.generate_schedule(db, db_loan, user_id=current_user.id)
         
-        # Get the updated payments
-        updated_payments = await payment_crud.get_payments_by_loan(db, loan_id)
+        # Fetch the new payments to return (optional, or return a success message)
+        payments_result = await payment_crud.get_payments_by_loan(db, loan_id=loan_id, user_id=current_user.id)
         
         return {
             "success": True,
-            "message": f"Recalculated {len(updated_payments)} payments for loan {loan_id}",
+            "message": f"Recalculated {len(payments_result)} payments for loan {loan_id}",
             "loan_id": loan_id,
-            "payment_count": len(updated_payments)
+            "payment_count": len(payments_result)
         }
     except Exception as e:
         raise HTTPException(
