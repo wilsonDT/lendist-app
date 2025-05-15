@@ -11,7 +11,7 @@ import { ArrowLeft, Calendar, DollarSign, CalendarCheck, User, Clock, CheckCircl
 import { useLoan } from "../hooks/useLoans"
 import { usePaymentsByLoan } from "../hooks/usePayments"
 import { api } from "../api/useApi"
-import { formatCurrency } from "../lib/utils"
+import { formatCurrency } from "@/lib/utils"
 import { DatePicker } from "../components/ui/date-picker"
 import { format, addDays, addWeeks, addMonths, addYears, parseISO } from "date-fns"
 import { useCollectPayment, useUpdatePayment } from "../hooks/usePayments"
