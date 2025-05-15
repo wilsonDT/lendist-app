@@ -9,7 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { CreateLoanDialog } from "../components/create-loan-dialog";
 import { useLoans, Loan } from "../hooks/useLoans";
 import { useBorrowers, Borrower } from "../hooks/useBorrowers";
-import { formatCurrency } from "../lib/utils.ts";
+import { formatCurrency } from "../lib/utils";
 
 export default function LoansPage() {
   const navigate = useNavigate();
