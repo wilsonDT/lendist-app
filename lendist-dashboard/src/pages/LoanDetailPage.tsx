@@ -176,38 +176,46 @@ export default function LoanDetailPage() {
   // Add status update mutation
   const updateLoanStatusMutation = useUpdateLoanStatus()
 
-  // Track if status has been updated to avoid unnecessary API calls
-  const [statusUpdated, setStatusUpdated] = useState(false)
-  
   // State for confirmation dialogs
   const [isRecalculateConfirmOpen, setIsRecalculateConfirmOpen] = useState(false);
   const [isRenewConfirmOpen, setIsRenewConfirmOpen] = useState(false);
   const [isUpdateStatusConfirmOpen, setIsUpdateStatusConfirmOpen] = useState(false);
   const [statusToUpdate, setStatusToUpdate] = useState<string | null>(null);
 
-  // Cast loan to use the actual status from the API
   const loan = loanData;
+
+  // Use useCallback for refreshAllData
+  const refreshAllData = useCallback(async () => {
+    console.log("Refreshing loan and payment data triggered by refreshAllData callback...");
+    try {
+      await refetchLoan();
+      await refetchPayments();
+    } catch (err) {
+      console.error("Error during refreshAllData:", err);
+      // Optionally, show a toast or handle error
+    }
+  }, [refetchLoan, refetchPayments]); // Dependencies for useCallback
   
-  // Mutation for renewing the loan
+  // Mutation for renewing the loan (should be preserved)
   const renewLoanMutation = useMutation(
-    async (loanIdToRenew: number): Promise<ExtendedLoan> => {
+    async (loanIdToRenew: number): Promise<ExtendedLoan> => { 
       const response = await api.post(`/loans/${loanIdToRenew}/renew`);
-      return response.data as ExtendedLoan;
+      return response.data as ExtendedLoan; 
     },
     {
       onSuccess: (newlyCreatedLoan: ExtendedLoan) => { 
-        console.log("Renew loan onSuccess triggered. Data:", newlyCreatedLoan); // DEBUG LINE
+        console.log("Renew loan onSuccess triggered. Data:", newlyCreatedLoan);
         toast({
           title: "Loan Renewed Successfully",
-          description: `Old loan #\${loanId} marked completed. New loan #\${newlyCreatedLoan.id} created.`,
+          description: `Old loan #${loanId} marked completed. New loan #${newlyCreatedLoan.id} created.`,
           variant: "default",
         });
         
-        console.log("Attempting to navigate to /loans"); // DEBUG LINE
+        console.log("Attempting to navigate to /loans");
         navigate("/loans");
       },
       onError: (error: any) => {
-        console.error("Renew loan onError triggered:", error); // DEBUG LINE
+        console.error("Renew loan onError triggered:", error);
         console.error("Error renewing loan:", error);
         toast({
           title: "Renewal Failed",
@@ -227,25 +235,19 @@ export default function LoanDetailPage() {
 
   // Add effect to refresh data when returning from payment page or on regular intervals
   useEffect(() => {
-    // Refetch all data immediately when the component mounts
-    const refreshAllData = async () => {
-      console.log("Refreshing loan and payment data...");
-      setStatusUpdated(false); // Reset the status update flag
-      await refetchLoan();
-      await refetchPayments();
-    };
-    
+    // Initial fetch when component mounts (or refreshAllData reference changes)
     refreshAllData();
     
     // Also set up a refresh interval (e.g., every 30 seconds) to catch updates made elsewhere
     const refreshInterval = setInterval(() => {
+      console.log("Refreshing loan and payment data due to interval...");
       refreshAllData();
     }, 30000); // 30 seconds
     
     return () => {
       clearInterval(refreshInterval);
     };
-  }, [refetchLoan, refetchPayments]);
+  }, [refreshAllData]); // Now, this effect only re-runs if refreshAllData's reference changes.
   
   const [paymentSchedule, setPaymentSchedule] = useState<Payment[]>([])
   const [paymentProgress, setPaymentProgress] = useState(0)
@@ -294,7 +296,7 @@ export default function LoanDetailPage() {
 
   // Process fetched payment data and update loan status if needed
   useEffect(() => {
-    if (payments && loan && !isLoading && !statusUpdated) {
+    if (payments && loan && !isLoading) {
       // Use the fetched payments directly
       setPaymentSchedule(payments);
 
@@ -317,44 +319,26 @@ export default function LoanDetailPage() {
       // Check if all payments are complete
       const allPaymentsComplete = payments.every(p => p.paid_at !== null && p.amount_paid >= p.amount_due);
       
-      // Only update status in the database if it needs to change
+      let newStatusToSet: string | null = null;
+
       if (allPaymentsComplete && loan.status !== "completed") {
-        console.log("All payments complete. Updating loan status to completed.");
-        updateLoanStatusMutation.mutate(
-          { loanId: loan.id, status: "completed" }, 
-          {
-            onSuccess: () => {
-              toast({
-                title: "Status Updated",
-                description: "Loan status updated to completed.",
-                variant: "default"
-              });
-              setStatusUpdated(true);
-              refetchLoan(); // Refresh loan data with updated status
-            },
-            onError: (error) => {
-              console.error("Error updating loan status:", error);
-              toast({
-                title: "Error",
-                description: "Failed to update loan status.",
-                variant: "destructive"
-              });
-            }
-          }
-        );
+        newStatusToSet = "completed";
       } else if (!allPaymentsComplete && loan.status === "completed") {
-        // If not all payments are complete but loan is marked as completed, update back to active
-        console.log("Not all payments complete. Updating loan status to active.");
+        newStatusToSet = "active";
+      }
+      
+      // Only update status in the database if it needs to change and no mutation is currently loading
+      if (newStatusToSet && !updateLoanStatusMutation.isLoading) {
+        console.log(`Loan ${loan.id}: Current status is '${loan.status}', payments imply '${newStatusToSet}'. Attempting to update.`);
         updateLoanStatusMutation.mutate(
-          { loanId: loan.id, status: "active" }, 
+          { loanId: loan.id, status: newStatusToSet }, 
           {
             onSuccess: () => {
               toast({
                 title: "Status Updated",
-                description: "Loan status updated to active.",
+                description: `Loan status updated to ${newStatusToSet}.`,
                 variant: "default"
               });
-              setStatusUpdated(true);
               refetchLoan(); // Refresh loan data with updated status
             },
             onError: (error) => {
@@ -369,7 +353,7 @@ export default function LoanDetailPage() {
         );
       }
     }
-  }, [payments, loan, isLoading, updateLoanStatusMutation, toast, refetchLoan, statusUpdated]);
+  }, [payments, loan, isLoading, updateLoanStatusMutation, toast, refetchLoan]);
 
   const confirmRecalculatePayments = () => {
     if (!loan) return;
@@ -381,7 +365,6 @@ export default function LoanDetailPage() {
           variant: "default"
         });
         refetchPayments(); 
-        setStatusUpdated(false); 
       },
       onError: (error) => {
         console.error("Error recalculating payments:", error);

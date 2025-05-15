@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy import select
 from typing import List, Dict, Any
 from pydantic import BaseModel
 from datetime import date, datetime
@@ -201,17 +202,34 @@ async def renew_loan_endpoint(
     loan_id: int,
     db: AsyncSession = Depends(get_session)
 ):
-    renewed_loan_instance = await loan_crud.renew_loan(db, loan_id)
+    renewed_loan_instance_from_crud = await loan_crud.renew_loan(db, loan_id)
     
-    if renewed_loan_instance is None:
-        db_loan = await loan_crud.get_loan(db, loan_id)
-        if db_loan is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original loan not found for renewal process.")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Loan with status '{db_loan.status}' cannot be renewed. Only 'active' or 'defaulted' loans are eligible."
-        )
+    if renewed_loan_instance_from_crud is None:
+        # Check if the original loan exists to give a more specific error
+        original_loan_check = await loan_crud.get_loan(db, loan_id) # get_loan is simpler for existence check
+        if original_loan_check is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Original loan with id {loan_id} not found.")
+        else:
+            # Loan exists, so renewal failed likely due to status or other precondition in CRUD
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Loan with id {loan_id} (status: '{original_loan_check.status}') cannot be renewed. Ensure it is 'active' or 'defaulted'."
+            )
         
-    await db.refresh(renewed_loan_instance, attribute_names=["borrower"], with_for_update=None)
+    # Re-fetch the renewed loan instance with the borrower relationship eagerly loaded
+    stmt = (
+        select(Loan)
+        .options(selectinload(Loan.borrower))
+        .where(Loan.id == renewed_loan_instance_from_crud.id)
+    )
+    result = await db.execute(stmt)
+    final_renewed_loan = result.scalar_one_or_none()
 
-    return renewed_loan_instance 
+    if final_renewed_loan is None:
+        # This would be an unexpected internal error if the loan was just created
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve details of the renewed loan after creation."
+        )
+
+    return final_renewed_loan 
