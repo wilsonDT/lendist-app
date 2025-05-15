@@ -1,13 +1,10 @@
 import * as React from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { format, addMonths, subMonths, setDate, isToday, isSameDay, getDate, getDay, getDaysInMonth, startOfMonth } from "date-fns";
-import { cn } from "../../lib/utils";
+import { cn } from "@/lib/utils";
+import { DayPicker } from "react-day-picker";
 
-export interface CalendarProps {
-  selectedDate: Date | undefined;
-  onDateSelect: (date: Date) => void;
-  className?: string;
-}
+export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 
 export function Calendar({ selectedDate, onDateSelect, className }: CalendarProps) {
   const [currentMonth, setCurrentMonth] = React.useState(selectedDate || new Date());
