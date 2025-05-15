@@ -10,6 +10,7 @@
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.13",
     "@radix-ui/react-slot": "^1.2.2",
+    "@supabase/supabase-js": "^2.49.4",
     "@tanstack/react-query": "^4.0.0",
     "@types/recharts": "^1.8.29",
     "axios": "^1.0.0",
@@ -20,7 +21,7 @@
     "next": "^14.0.0",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
-    "react-router-dom": "^6.0.0",
+    "react-router-dom": "^6.30.0",
     "recharts": "^2.15.3",
     "tailwind-merge": "^1.14.0",
     "tailwindcss-animate": "^1.0.7"

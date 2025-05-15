@@ -5,6 +5,7 @@ load_dotenv()
 
 class Settings(BaseSettings):
     DATABASE_URL: str
+    SUPABASE_JWT_SECRET: str
     SECRET_KEY: str = "supersecretkey"
     APP_NAME: str = "Lending App"
 

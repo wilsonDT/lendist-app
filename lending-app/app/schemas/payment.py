@@ -18,6 +18,7 @@ class PaymentUpdate(BaseModel):
 
 class PaymentResponse(PaymentBase):
     id: int
+    user_id: str
     amount_paid: float
     paid_at: Optional[datetime] = None
     # Remove the loan relationship

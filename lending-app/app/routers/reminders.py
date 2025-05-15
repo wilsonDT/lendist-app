@@ -5,6 +5,8 @@ from datetime import date, timedelta
 from sqlmodel import select, join
 
 from app.core.database import get_session
+from app.core.auth import get_current_user
+from app.models.user import User
 from app.schemas.payment import PaymentResponse
 from app.crud import payment as payment_crud
 from app.models.payment import Payment
@@ -15,13 +17,15 @@ router = APIRouter()
 
 @router.get("/today", response_model=List[Dict[str, Any]])
 async def todays_reminders(
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get payments due today or tomorrow
     """
     today = date.today()
     tomorrow = today + timedelta(days=1)
+    user_id = current_user.id
     
     # Get payments due today or tomorrow along with loan and borrower info
     query = select(
@@ -34,7 +38,8 @@ async def todays_reminders(
         Borrower, Loan.borrower_id == Borrower.id
     ).where(
         Payment.due_date.between(today, tomorrow),
-        Payment.amount_paid < Payment.amount_due
+        Payment.amount_paid < Payment.amount_due,
+        Loan.user_id == user_id
     )
     
     result = await db.execute(query)
@@ -61,13 +66,14 @@ async def todays_reminders(
 async def trigger_reminders(
     background_tasks: BackgroundTasks,
     days: int = 7, 
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Manually trigger reminders for upcoming payments
     This would normally connect to an SMS/notification service
     """
-    upcoming = await payment_crud.get_upcoming_payments(db, days)
+    upcoming = await payment_crud.get_upcoming_payments(db=db, days=days, user_id=current_user.id)
     
     # In a real system, this would send SMS/WhatsApp messages
     # Here we just simulate by adding a background task

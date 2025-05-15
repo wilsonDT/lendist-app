@@ -30,6 +30,7 @@ class LoanUpdate(BaseModel):
 
 class LoanResponse(LoanBase):
     id: int
+    user_id: str
     created_at: datetime
     borrower: Optional[BorrowerResponse] = None
     

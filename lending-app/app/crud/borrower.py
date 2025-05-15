@@ -3,60 +3,51 @@ from app.models.borrower import Borrower
 from app.schemas.borrower import BorrowerCreate, BorrowerUpdate
 from typing import List, Optional
 
-async def create_borrower(db: Session, borrower: BorrowerCreate) -> Borrower:
-    # Explicitly create a Borrower with only the fields that exist in the database
-    # Do not include email and address as they might not exist in the actual database table
+async def create_borrower(db: Session, borrower_data: BorrowerCreate, user_id: str) -> Borrower:
     db_borrower = Borrower(
-        name=borrower.name,
-        mobile=borrower.mobile
+        **borrower_data.model_dump(),
+        user_id=user_id
     )
     db.add(db_borrower)
     await db.commit()
     await db.refresh(db_borrower)
     return db_borrower
 
-async def get_borrower(db: Session, borrower_id: int) -> Optional[Borrower]:
-    # Use explicit column selection to avoid issues with columns that might not exist
+async def get_borrower(db: Session, borrower_id: int, user_id: str) -> Optional[Borrower]:
     result = await db.execute(
-        select(
-            Borrower.id, 
-            Borrower.name, 
-            Borrower.mobile, 
-            Borrower.created_at
-        ).where(Borrower.id == borrower_id)
+        select(Borrower)
+        .where(Borrower.id == borrower_id)
+        .where(Borrower.user_id == user_id)
     )
-    return result.fetchone()
+    return result.scalars().first()
 
-async def get_borrowers(db: Session, skip: int = 0, limit: int = 100) -> List[Borrower]:
-    # Use explicit column selection to avoid issues with columns that might not exist
+async def get_borrowers(db: Session, user_id: str, skip: int = 0, limit: int = 100) -> List[Borrower]:
     result = await db.execute(
-        select(
-            Borrower.id, 
-            Borrower.name, 
-            Borrower.mobile, 
-            Borrower.created_at
-        ).offset(skip).limit(limit)
+        select(Borrower)
+        .where(Borrower.user_id == user_id)
+        .offset(skip)
+        .limit(limit)
     )
-    return result.fetchall()
+    return result.scalars().all()
 
-async def update_borrower(db: Session, borrower_id: int, borrower: BorrowerUpdate) -> Optional[Borrower]:
-    db_borrower = await get_borrower(db, borrower_id)
+async def update_borrower(db: Session, borrower_id: int, borrower_update_data: BorrowerUpdate, user_id: str) -> Optional[Borrower]:
+    db_borrower = await get_borrower(db, borrower_id, user_id=user_id)
     if not db_borrower:
         return None
     
-    borrower_data = borrower.model_dump(exclude_unset=True)
-    for key, value in borrower_data.items():
-        # Skip fields that don't exist in the database
-        if key not in ['name', 'mobile']:
-            continue
+    update_data = borrower_update_data.model_dump(exclude_unset=True)
+    if 'user_id' in update_data:
+        del update_data['user_id']
+        
+    for key, value in update_data.items():
         setattr(db_borrower, key, value)
     
     await db.commit()
     await db.refresh(db_borrower)
     return db_borrower
 
-async def delete_borrower(db: Session, borrower_id: int) -> bool:
-    db_borrower = await get_borrower(db, borrower_id)
+async def delete_borrower(db: Session, borrower_id: int, user_id: str) -> bool:
+    db_borrower = await get_borrower(db, borrower_id, user_id=user_id)
     if not db_borrower:
         return False
     
