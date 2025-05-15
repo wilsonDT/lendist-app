@@ -1,9 +1,10 @@
-from sqlmodel import select, Session
+from sqlmodel import select, Session, delete
+from sqlalchemy.orm import selectinload
 from app.models.loan import Loan
 from app.models.payment import Payment
 from app.schemas.loan import LoanCreate, LoanUpdate
 from typing import List, Optional, Dict, Any
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 
 async def create_loan(db: Session, loan: LoanCreate) -> Loan:
     db_loan = Loan(**loan.model_dump())
@@ -50,6 +51,55 @@ async def delete_loan(db: Session, loan_id: int) -> bool:
     await db.delete(db_loan)
     await db.commit()
     return True
+
+async def renew_loan(db: Session, loan_id: int) -> Optional[Loan]:
+    # Step 1: Fetch the original loan and eagerly load its payments
+    result = await db.execute(
+        select(Loan).options(selectinload(Loan.payments)).where(Loan.id == loan_id)
+    )
+    original_loan = result.scalars().first()
+
+    if not original_loan:
+        return None # Loan not found
+
+    # Prevent renewing an already completed or cancelled loan
+    if original_loan.status in ["completed", "cancelled"]:
+        return None # Not eligible for renewal
+
+    # Step 2: Mark all existing payments of the original loan as fully paid
+    for payment in original_loan.payments:
+        if payment.paid_at is None or payment.amount_paid < payment.amount_due:
+            payment.amount_paid = payment.amount_due
+            payment.paid_at = datetime.utcnow()
+            db.add(payment) # Add updated payment to session
+
+    # Step 3: Update the original loan's status to "completed"
+    original_loan.status = "completed"
+    db.add(original_loan) # Add updated loan to session
+
+    # Step 4: Commit changes for the original loan
+    await db.commit()
+    # Refresh is not strictly necessary here for original_loan as we are done with it.
+
+    # Step 5: Prepare data for the new loan
+    new_loan_data = LoanCreate(
+        borrower_id=original_loan.borrower_id,
+        principal=original_loan.principal,
+        interest_rate_percent=original_loan.interest_rate_percent,
+        term_units=original_loan.term_units,
+        term_frequency=original_loan.term_frequency,
+        repayment_type=original_loan.repayment_type,
+        interest_cycle=original_loan.interest_cycle, # Ensure this is present in LoanCreate or Loan model
+        start_date=date.today()
+        # status will default to "active" or as defined in Loan model/LoanCreate schema
+    )
+
+    # Step 6: Call create_loan to create the new loan and its schedule
+    # create_loan itself handles db.add, db.commit, db.refresh, and schedule generation
+    newly_created_loan = await create_loan(db, new_loan_data)
+    
+    # Step 7: Return the newly created loan
+    return newly_created_loan
 
 async def generate_schedule(db: Session, loan: Loan) -> None:
     # Set default interest cycle if not specified

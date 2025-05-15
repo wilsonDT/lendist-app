@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from typing import List, Dict, Any
 from pydantic import BaseModel
 from datetime import date, datetime
@@ -9,6 +10,7 @@ from app.schemas.loan import LoanCreate, LoanUpdate, LoanResponse
 from app.crud import loan as loan_crud
 from app.schemas import ResponseModel
 from app.models.payment import Payment
+from app.models.loan import Loan
 
 router = APIRouter()
 
@@ -192,4 +194,24 @@ async def update_loan_status(
     return LoanStatusUpdatedResponse(
         id=db_loan.id,
         status=db_loan.status
-    ) 
+    )
+
+@router.post("/{loan_id}/renew", response_model=LoanResponse)
+async def renew_loan_endpoint(
+    loan_id: int,
+    db: AsyncSession = Depends(get_session)
+):
+    renewed_loan_instance = await loan_crud.renew_loan(db, loan_id)
+    
+    if renewed_loan_instance is None:
+        db_loan = await loan_crud.get_loan(db, loan_id)
+        if db_loan is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original loan not found for renewal process.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Loan with status '{db_loan.status}' cannot be renewed. Only 'active' or 'defaulted' loans are eligible."
+        )
+        
+    await db.refresh(renewed_loan_instance, attribute_names=["borrower"], with_for_update=None)
+
+    return renewed_loan_instance 
