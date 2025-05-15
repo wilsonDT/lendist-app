@@ -46,7 +46,7 @@ export default function PaymentsWidget() {
   const formatPaymentDate = (dateString: string) => {
     try {
       return format(new Date(dateString), 'MMM dd, yyyy');
-    } catch (e) {
+    } catch (_e) {
       return dateString;
     }
   };

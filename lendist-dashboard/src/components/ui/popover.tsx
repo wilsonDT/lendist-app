@@ -15,8 +15,8 @@ export function Popover({
   className,
   open,
   onOpenChange,
-  align = "center",
-  sideOffset = 4,
+  align: _align = "center",
+  sideOffset: _sideOffset = 4,
 }: PopoverProps) {
   const [isOpen, setIsOpen] = React.useState(open || false);
   const popoverRef = React.useRef<HTMLDivElement>(null);
@@ -65,7 +65,7 @@ export interface PopoverTriggerProps extends React.ButtonHTMLAttributes<HTMLButt
 
 export function PopoverTrigger({ 
   children,
-  asChild = false,
+  asChild: _asChild = false,
   ...props
 }: PopoverTriggerProps) {
   return (

@@ -8,23 +8,26 @@ interface ToastProps {
   duration?: number;
 }
 
+// Define the shape of the event detail
+interface ToastEventDetail {
+  toast: ToastProps & { id: number };
+}
+
 export function useToast() {
-  const [toasts, setToasts] = useState<ToastProps[]>([]);
+  // Removed unused _toasts and setToasts state
 
   const toast = (props: ToastProps) => {
     const id = Date.now();
-    const newToast = {
+    const newToastWithId = {
       ...props,
       id,
-      duration: props.duration || 3000,
+      duration: props.duration || 3000, // Default duration if not provided
     };
 
-    setToasts((prevToasts) => [...prevToasts, newToast]);
-
-    // Remove toast after duration
-    setTimeout(() => {
-      setToasts((prevToasts) => prevToasts.filter((toast) => toast.id !== id));
-    }, newToast.duration);
+    // Dispatch a global event for the ToastContainer to pick up
+    window.dispatchEvent(new CustomEvent<ToastEventDetail>('toast', { 
+      detail: { toast: newToastWithId }
+    }));
   };
 
   return { toast };
@@ -36,7 +39,7 @@ export function ToastContainer() {
 
   // Global event listener for new toasts
   useEffect(() => {
-    const handleToast = (event: CustomEvent) => {
+    const handleToast = (event: CustomEvent<ToastEventDetail>) => {
       const { toast } = event.detail;
       setToasts((prev) => [...prev, toast]);
       
@@ -46,8 +49,10 @@ export function ToastContainer() {
       }, toast.duration || 3000);
     };
 
-    window.addEventListener('toast' as any, handleToast as any);
-    return () => window.removeEventListener('toast' as any, handleToast as any);
+    const eventListener = handleToast as EventListener;
+
+    window.addEventListener('toast', eventListener);
+    return () => window.removeEventListener('toast', eventListener);
   }, []);
 
   if (toasts.length === 0) return null;

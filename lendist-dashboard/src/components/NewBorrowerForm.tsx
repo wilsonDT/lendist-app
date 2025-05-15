@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useCreateBorrower } from '../hooks/useBorrowers';
 
 export default function NewBorrowerForm() {
   const [isOpen, setIsOpen] = useState(false);

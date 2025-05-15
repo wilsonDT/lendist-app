@@ -12,9 +12,7 @@ import { RepaymentSchedulePreview } from "./RepaymentSchedulePreview"
 import axios from "axios"
 
 // We're using these components type-unsafely due to TS issues, but they exist
-// @ts-ignore
 import { Label } from "./ui/label"
-// @ts-ignore
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 
 interface CreateLoanDialogProps {
@@ -26,8 +24,8 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
   const navigate = useNavigate()
   const createLoan = useCreateLoan()
   const { data: borrowers, isLoading: borrowersLoading, error } = useBorrowers()
-  // Cast error to any to avoid type issues
-  const borrowersError = error as any;
+  // Cast error to Error | null
+  const borrowersError = error as Error | null;
 
   const [formData, setFormData] = useState({
     borrowerId: "",
@@ -160,16 +158,22 @@ export function CreateLoanDialog({ isOpen, onClose }: CreateLoanDialogProps) {
       console.log(`Navigating to /loans/${createdLoanId}`);
       navigate(`/loans/${createdLoanId}`);
       
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error creating loan:", error)
       
-      // Show a more descriptive error message
-      const err = error as any; // Type assertion
-      if (err.response && err.response.data) {
-        alert(`Failed to create loan: ${err.response.data.detail || JSON.stringify(err.response.data)}`)
-      } else {
-        alert("Failed to create loan. Please check browser console for details and contact your backend team.\n\nError: The 'status' field needs to be added to the loan creation schema on the backend.")
+      let errorMessage = "Failed to create loan. An unknown error occurred.";
+
+      if (axios.isAxiosError(error)) {
+        if (error.response && error.response.data && typeof error.response.data === 'object') {
+          const responseData = error.response.data as { detail?: string; [key: string]: unknown };
+          errorMessage = `Failed to create loan: ${responseData.detail || JSON.stringify(responseData)}`;
+        } else if (error.message) {
+          errorMessage = `Failed to create loan: ${error.message}`;
+        }
+      } else if (error instanceof Error) {
+        errorMessage = `Failed to create loan. Please check browser console for details and contact your backend team.\n\nError: ${error.message}`;
       }
+      alert(errorMessage);
     } finally {
       setIsSubmitting(false)
     }

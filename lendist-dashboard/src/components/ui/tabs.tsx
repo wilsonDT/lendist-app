@@ -17,12 +17,12 @@ const Tabs: React.FC<TabsProps> = ({ defaultValue, value, onValueChange, childre
     }
   }, [value]);
   
-  const handleTabChange = (tabValue: string) => {
+  const handleTabChange = React.useCallback((tabValue: string) => {
     setSelectedTab(tabValue);
     if (onValueChange) {
       onValueChange(tabValue);
     }
-  };
+  }, [onValueChange]);
   
   const contextValue = React.useMemo(() => {
     return {

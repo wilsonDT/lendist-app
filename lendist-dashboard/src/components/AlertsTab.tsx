@@ -29,7 +29,7 @@ export default function AlertsTab() {
 
   return (
     <div className="bg-card rounded-lg shadow p-6 mt-6">
-      <h2 className="text-xl font-semibold mb-4 text-card-foreground">Today's Reminders</h2>
+      <h2 className="text-xl font-semibold mb-4 text-card-foreground">Today&apos;s Reminders</h2>
       <div className="space-y-4">
         {reminders.map((reminder) => (
           <div 

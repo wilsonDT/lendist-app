@@ -18,7 +18,7 @@ const Select = React.forwardRef<
     onValueChange?: (value: string) => void
     name?: string
   }
->(({ className, children, value, onValueChange, name, ...props }, ref) => {
+>(({ className, children, value, onValueChange, name: _name, ...props }, _ref) => {
   const [isOpen, setIsOpen] = React.useState(false)
   const selectRef = React.useRef<HTMLDivElement>(null)
 

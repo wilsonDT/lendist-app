@@ -122,7 +122,7 @@ export function useUpdatePayment() {
 export function useRecalculatePayments() {
   const queryClient = useQueryClient();
   
-  return useMutation<any, Error, number>(
+  return useMutation<unknown, Error, number>(
     (loanId: number) => api.post(`/payments/loan/${loanId}/recalculate`).then(res => res.data),
     {
       onSuccess: (data, loanId) => {

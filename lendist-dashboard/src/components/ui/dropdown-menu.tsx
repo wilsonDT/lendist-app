@@ -17,7 +17,7 @@ interface DropdownMenuTriggerProps {
 
 const DropdownMenuTrigger: React.FC<DropdownMenuTriggerProps> = ({ 
   children,
-  asChild = false,
+  asChild: _asChild = false,
   onClick
 }) => {
   return (

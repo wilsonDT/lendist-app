@@ -1,15 +1,14 @@
 import * as React from "react"
 import { 
-  Toast, 
-  ToastClose, 
-  ToastDescription, 
-  ToastProvider, 
-  ToastTitle, 
+  Toast as RadixToast,
+  ToastClose as RadixToastClose,
+  ToastDescription as RadixToastDescription,
+  ToastProvider,
+  ToastTitle as RadixToastTitle,
   ToastViewport 
 } from "@radix-ui/react-toast"
 import { cva, type VariantProps } from "class-variance-authority"
 import { X } from "lucide-react"
-import { type ToastProps, type ToastActionElement } from "./ui/toast"
 import { cn } from "@/lib/utils"
 
 const ToastVariants = cva(
@@ -29,12 +28,12 @@ const ToastVariants = cva(
 )
 
 const Toast = React.forwardRef<
-  React.ElementRef<typeof Toast>,
-  React.ComponentPropsWithoutRef<typeof Toast> &
+  React.ElementRef<typeof RadixToast>,
+  React.ComponentPropsWithoutRef<typeof RadixToast> &
     VariantProps<typeof ToastVariants>
 >(({ className, variant, ...props }, ref) => {
   return (
-    <Toast
+    <RadixToast
       ref={ref}
       className={cn(ToastVariants({ variant }), className)}
       {...props}
@@ -59,10 +58,10 @@ const ToastAction = React.forwardRef<
 ToastAction.displayName = "ToastAction"
 
 const ToastClose = React.forwardRef<
-  React.ElementRef<typeof ToastClose>,
-  React.ComponentPropsWithoutRef<typeof ToastClose>
+  React.ElementRef<typeof RadixToastClose>,
+  React.ComponentPropsWithoutRef<typeof RadixToastClose>
 >(({ className, ...props }, ref) => (
-  <ToastClose
+  <RadixToastClose
     ref={ref}
     className={cn(
       "absolute right-2 top-2 rounded-md p-1 text-foreground/50 opacity-0 transition-opacity hover:text-foreground focus:opacity-100 focus:outline-none focus:ring-2 group-hover:opacity-100 group-[.destructive]:text-red-300 group-[.destructive]:hover:text-red-50 group-[.destructive]:focus:ring-red-400 group-[.destructive]:focus:ring-offset-red-600",
@@ -72,15 +71,15 @@ const ToastClose = React.forwardRef<
     {...props}
   >
     <X className="h-4 w-4" />
-  </ToastClose>
+  </RadixToastClose>
 ))
 ToastClose.displayName = "ToastClose"
 
 const ToastTitle = React.forwardRef<
-  React.ElementRef<typeof ToastTitle>,
-  React.ComponentPropsWithoutRef<typeof ToastTitle>
+  React.ElementRef<typeof RadixToastTitle>,
+  React.ComponentPropsWithoutRef<typeof RadixToastTitle>
 >(({ className, ...props }, ref) => (
-  <ToastTitle
+  <RadixToastTitle
     ref={ref}
     className={cn("text-sm font-semibold", className)}
     {...props}
@@ -89,18 +88,16 @@ const ToastTitle = React.forwardRef<
 ToastTitle.displayName = "ToastTitle"
 
 const ToastDescription = React.forwardRef<
-  React.ElementRef<typeof ToastDescription>,
-  React.ComponentPropsWithoutRef<typeof ToastDescription>
+  React.ElementRef<typeof RadixToastDescription>,
+  React.ComponentPropsWithoutRef<typeof RadixToastDescription>
 >(({ className, ...props }, ref) => (
-  <ToastDescription
+  <RadixToastDescription
     ref={ref}
     className={cn("text-sm opacity-90", className)}
     {...props}
   />
 ))
 ToastDescription.displayName = "ToastDescription"
-
-const TOAST_LIMIT = 1;
 
 export {
   Toast,

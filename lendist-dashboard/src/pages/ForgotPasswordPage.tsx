@@ -49,7 +49,7 @@ export default function ForgotPasswordPage() {
                   <CheckCircle2 className="h-8 w-8" />
                 </div>
                 <p className="text-muted-foreground">
-                  We've sent a password reset link to <strong>{email}</strong>. Please check your inbox and follow the
+                  We&apos;ve sent a password reset link to <strong>{email}</strong>. Please check your inbox and follow the
                   instructions.
                 </p>
                 <Button className="mt-4 w-full" asChild>

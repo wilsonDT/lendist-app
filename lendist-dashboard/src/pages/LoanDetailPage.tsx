@@ -1,19 +1,18 @@
-import { useState, useEffect, useRef, useCallback } from "react"
-import { useParams, useNavigate, useLocation } from "react-router-dom"
+import { useState, useEffect, useCallback } from "react"
+import { useParams, useNavigate } from "react-router-dom"
 import { Sidebar } from "../components/sidebar"
 import { Header } from "../components/header"
 import { Button } from "../components/ui/button"
 import { Card, CardContent } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import { Progress } from "../components/ui/progress"
-import { ArrowLeft, Calendar, CreditCard, DollarSign, User, Clock, FileText, CheckCircle2, PlusCircle, AlertCircle, RotateCw, RefreshCcw } from "lucide-react"
+import { ArrowLeft, Calendar, DollarSign, User, Clock, CheckCircle2, RotateCw, RefreshCcw } from "lucide-react"
 import { LoanDetailPageSkeleton } from "../components/skeleton-layout"
 import { useLoan, useUpdateLoanStatus } from "../hooks/useLoans"
 import { usePaymentsByLoan, useRecalculatePayments } from "../hooks/usePayments"
 import { api } from "../api/useApi"
 import { formatCurrency } from "@/lib/utils"
 import { useToast } from "../components/ui/use-toast"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { PaymentStatus } from "../components/PaymentStatus"
 import { useMutation } from "@tanstack/react-query"
 import {
@@ -27,6 +26,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import axios from "axios"
 
 // Payment interface
 interface Payment {
@@ -57,106 +57,14 @@ interface ExtendedLoan {
 // Add a cache outside the component to prevent refetching the same borrower
 const borrowerCache = new Map<number, string>();
 
-// Add this near the borrowerCache
-const paymentScheduleCache = new Map<number, any[]>();
-
 // Helper function to capitalize first letter
 const capitalizeFirstLetter = (str: string): string => {
   if (!str) return '';
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 };
 
-// Add a helper function to calculate payment amount with interest
-const calculatePaymentWithInterest = (principal: number, interestRate: number, terms: number, frequency: string = "monthly", repaymentType: string = "amortized", interestCycle: string = "yearly"): number => {
-  // Debug logs
-  console.log("Payment calculation with:", {
-    principal,
-    interestRate,
-    terms, 
-    frequency,
-    repaymentType,
-    interestCycle
-  });
-  
-  // Calculate annual interest rate equivalent based on the interest cycle
-  const getAnnualizedInterestRate = (): number => {
-    switch (interestCycle.toLowerCase()) {
-      case "one-time":
-        return interestRate; // One-time interest
-      case "daily":
-        return interestRate * 365; // Daily interest to annual
-      case "weekly":
-        return interestRate * 52; // Weekly interest to annual
-      case "monthly":
-        return interestRate * 12; // Monthly interest to annual
-      case "yearly":
-        return interestRate; // Already annual
-      default:
-        return interestRate; // Default to annual
-    }
-  };
-  
-  // Get periodic interest rate based on payment frequency
-  const getPeriodicInterestRate = (): number => {
-    const annualRate = getAnnualizedInterestRate();
-    
-    switch (frequency.toLowerCase()) {
-      case "daily":
-        return annualRate / 365;
-      case "weekly":
-        return annualRate / 52;
-      case "monthly":
-        return annualRate / 12;
-      case "quarterly":
-        return annualRate / 4;
-      case "yearly":
-        return annualRate;
-      default:
-        return annualRate / 12; // Default to monthly
-    }
-  };
-  
-  // Get the periodic interest rate for calculations
-  const periodicRate = getPeriodicInterestRate() / 100; // Convert percentage to decimal
-  console.log("Periodic rate:", periodicRate);
-
-  if (repaymentType.toLowerCase() === "flat") {
-    // Flat loans: interest is calculated on the full principal amount,
-    // and the principal is distributed evenly across all payments
-    const interestPerPeriod = principal * periodicRate;
-    const principalPerPeriod = principal / terms;
-    
-    const payment = principalPerPeriod + interestPerPeriod;
-    console.log("Flat payment calculation:", {
-      interestPerPeriod,
-      principalPerPeriod,
-      payment
-    });
-    return payment;
-  } else {
-    // Amortized loans: equal payments including both principal and interest
-    // Use formula: P * r * (1 + r)^n / ((1 + r)^n - 1)
-    if (periodicRate === 0) return principal / terms; // Handle zero interest case
-
-    const numerator = periodicRate * Math.pow(1 + periodicRate, terms);
-    const denominator = Math.pow(1 + periodicRate, terms) - 1;
-    
-    // Handle edge case to avoid division by zero
-    if (denominator === 0) return principal / terms;
-    
-    const payment = principal * (numerator / denominator);
-    console.log("Amortized payment calculation:", {
-      numerator,
-      denominator,
-      payment
-    });
-    return payment;
-  }
-};
-
 export default function LoanDetailPage() {
   const navigate = useNavigate()
-  const location = useLocation() // Add this to detect navigation from payment page
   const { id } = useParams<{ id: string }>()
   const [activeTab, setActiveTab] = useState("payment")
   const { toast } = useToast()
@@ -214,12 +122,22 @@ export default function LoanDetailPage() {
         console.log("Attempting to navigate to /loans");
         navigate("/loans");
       },
-      onError: (error: any) => {
+      onError: (error: unknown) => {
         console.error("Renew loan onError triggered:", error);
         console.error("Error renewing loan:", error);
+        
+        let description = "Failed to renew the loan. Please ensure the backend supports this feature.";
+        
+        // Check if it is an AxiosError and has the expected structure
+        if (axios.isAxiosError(error) && error.response?.data && typeof error.response.data.detail === 'string') {
+          description = error.response.data.detail;
+        } else if (error instanceof Error) {
+          description = error.message; // Fallback to generic error message
+        }
+
         toast({
           title: "Renewal Failed",
-          description: error.response?.data?.detail || "Failed to renew the loan. Please ensure the backend supports this feature.",
+          description: description,
           variant: "destructive",
         });
       },

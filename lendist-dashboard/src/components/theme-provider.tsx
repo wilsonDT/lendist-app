@@ -28,7 +28,7 @@ export function ThemeProvider({
   children,
   defaultTheme = "system",
   attribute = "data-theme",
-  enableSystem = true,
+  enableSystem: _enableSystem = true,
   disableTransitionOnChange = false,
 }: ThemeProviderProps) {
   const [theme, setTheme] = React.useState<Theme>(

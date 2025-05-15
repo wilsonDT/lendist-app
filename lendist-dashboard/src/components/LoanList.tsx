@@ -12,15 +12,9 @@ export default function LoanList({ borrowerId }: LoanListProps) {
   const { data: borrowers, isLoading: borrowersLoading } = useBorrowers();
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed' | 'defaulted'>('all');
   
-  const isLoading = loansLoading || borrowersLoading;
-  const error = loansError;
-  
-  if (isLoading) return <div className="text-center py-4">Loading loans...</div>;
-  if (error) return <div className="text-center py-4 text-red-500">Error loading loans</div>;
-  if (!loans || loans.length === 0) return <div className="text-center py-4">No loans found</div>;
-
   // Filter loans by borrowerId and status
   const filteredLoans = useMemo(() => {
+    if (!loans) return []; // Add a check for undefined loans
     let result = borrowerId 
       ? loans.filter(loan => loan.borrower_id === borrowerId)
       : loans;
@@ -38,6 +32,13 @@ export default function LoanList({ borrowerId }: LoanListProps) {
     });
   }, [loans, borrowerId, statusFilter]);
     
+  const isLoading = loansLoading || borrowersLoading;
+  const error = loansError;
+  
+  if (isLoading) return <div className="text-center py-4">Loading loans...</div>;
+  if (error) return <div className="text-center py-4 text-red-500">Error loading loans</div>;
+  if (!loans || loans.length === 0) return <div className="text-center py-4">No loans found</div>;
+
   if (filteredLoans.length === 0) return <div className="text-center py-4">No loans found matching the selected filters</div>;
   
   // Function to get borrower name from borrower ID

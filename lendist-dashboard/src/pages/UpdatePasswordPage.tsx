@@ -19,7 +19,7 @@ export default function UpdatePasswordPage() {
   // Handle the onAuthStateChange for password recovery
   useEffect(() => {
     // Listen for PASSWORD_RECOVERY event
-    const { data: { subscription }  } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+    const { data: { subscription }  } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, _session: Session | null) => {
       if (event === 'PASSWORD_RECOVERY') {
         setMessage('You can now set your new password. The page will handle the update once you submit.');
         // Supabase client handles the session for password recovery automatically based on the URL.

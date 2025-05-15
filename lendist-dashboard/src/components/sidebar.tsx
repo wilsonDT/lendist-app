@@ -1,12 +1,11 @@
 "use client";
 
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { LayoutDashboard, Users, CreditCard, ChevronLeft, Menu } from "lucide-react";
 import { Button } from "./ui/button";
 import { useState, useEffect } from "react";
 import { useMobile } from "../hooks/use-mobile";
-import { LendistLogo } from "./lendist-logo";
 
 const routes = [
   {

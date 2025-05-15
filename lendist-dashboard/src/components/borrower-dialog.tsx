@@ -48,7 +48,7 @@ export function BorrowerDialog({ borrower, isOpen, onClose }: BorrowerDialogProp
   const formatDate = (dateString: string) => {
     try {
       return format(new Date(dateString), "MMM d, yyyy");
-    } catch (e) {
+    } catch (_e) {
       return dateString;
     }
   };

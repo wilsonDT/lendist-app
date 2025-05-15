@@ -4,28 +4,17 @@ import { Sidebar } from "../components/sidebar"
 import { Header } from "../components/header"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
-import { Badge } from "../components/ui/badge"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
-import { ArrowLeft, Calendar, DollarSign, CalendarCheck, User, Clock, CheckCircle2 } from "lucide-react"
+import { ArrowLeft, DollarSign, User, Clock, CheckCircle2 } from "lucide-react"
 import { useLoan } from "../hooks/useLoans"
-import { usePaymentsByLoan } from "../hooks/usePayments"
+import { usePaymentsByLoan, Payment } from "../hooks/usePayments"
 import { api } from "../api/useApi"
 import { formatCurrency } from "@/lib/utils"
 import { DatePicker } from "../components/ui/date-picker"
 import { format, addDays, addWeeks, addMonths, addYears, parseISO } from "date-fns"
 import { useCollectPayment, useUpdatePayment } from "../hooks/usePayments"
 import { useToast } from "../components/ui/use-toast"
-
-// Payment interface
-interface Payment {
-  id: number;
-  loan_id: number;
-  amount_due: number;
-  amount_paid: number;
-  due_date: string;
-  paid_at: string | null;
-}
 
 // Cache for borrower names
 const borrowerCache = new Map<number, string>();
@@ -54,45 +43,6 @@ const calculateFirstPaymentDate = (startDate: Date, termFrequency: string): Date
   return calculateNextPaymentDate(startDate, termFrequency);
 };
 
-// Add helper from LoanDetailPage to compute payments accurately
-const calculatePaymentWithInterest = (
-  principal: number,
-  interestRate: number,
-  terms: number,
-  frequency: string,
-  repaymentType: string,
-  interestCycle: string
-): number => {
-  // Calculate annualized interest
-  const getAnnualizedInterestRate = () => {
-    switch (interestCycle.toLowerCase()) {
-      case "one-time": return interestRate;
-      case "daily": return interestRate * 365;
-      case "weekly": return interestRate * 52;
-      case "monthly": return interestRate * 12;
-      default: return interestRate;
-    }
-  };
-  const annualRate = getAnnualizedInterestRate();
-  // periodic rate
-  const rateMap: Record<string, number> = {
-    daily: annualRate / 365,
-    weekly: annualRate / 52,
-    monthly: annualRate / 12,
-    quarterly: annualRate / 4,
-    yearly: annualRate
-  };
-  const periodicRate = (rateMap[frequency.toLowerCase()] ?? rateMap.monthly) / 100;
-  if (repaymentType.toLowerCase() === "flat") {
-    const interestPerPeriod = principal * periodicRate;
-    return principal / terms + interestPerPeriod;
-  }
-  if (periodicRate === 0) return principal / terms;
-  const num = periodicRate * Math.pow(1 + periodicRate, terms);
-  const den = Math.pow(1 + periodicRate, terms) - 1;
-  return principal * (num / den);
-};
-
 export default function RepaymentPage() {
   const navigate = useNavigate()
   const { id: loanId } = useParams<{ id: string }>()
@@ -105,7 +55,7 @@ export default function RepaymentPage() {
   const [borrowerName, setBorrowerName] = useState<string>("")
   const [paymentAmount, setPaymentAmount] = useState<string>("")
   const [paymentDate, setPaymentDate] = useState<Date>(new Date())
-  const [nextPaymentDue, setNextPaymentDue] = useState<any>(null)
+  const [nextPaymentDue, setNextPaymentDue] = useState<Payment | null>(null)
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
   const [nextPaymentDueDate, setNextPaymentDueDate] = useState<Date>(new Date())
 

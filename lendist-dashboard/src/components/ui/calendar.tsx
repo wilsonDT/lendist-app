@@ -1,6 +1,6 @@
 import * as React from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { format, addMonths, subMonths, setDate, isToday, isSameDay, getDate, getDay, getDaysInMonth, startOfMonth } from "date-fns";
+import { format, addMonths, subMonths, setDate, isToday, isSameDay, getDay, getDaysInMonth, startOfMonth } from "date-fns";
 import { cn } from "@/lib/utils";
 import { DayPicker } from "react-day-picker";
 
