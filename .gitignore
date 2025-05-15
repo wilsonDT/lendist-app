@@ -38,3 +38,12 @@ env/
 # Node.js
 node_modules/
 */node_modules/
+
+# DS Store
+.DS_Store
+
+# Docker
+.docker/
+
+# Logs
+logs/
